@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class DOMNode(BaseModel):
@@ -24,10 +24,11 @@ class DOMNode(BaseModel):
     name: str = Field(..., alias='nodeName')
     local_name: str = Field(..., alias='localName')
     value: str = Field(..., alias='nodeValue')
-    children: List[DOMNode] = []
-    attributes: Dict[str, str] = {}
+    children: List[DOMNode] = Field(default_factory=list)
+    attributes: Dict[str, str] = Field(default_factory=dict)
 
-    @validator('attributes', pre=True)
+    @field_validator('attributes', mode='before')
+    @classmethod
     def validate_attributes(cls, attributes_list: list[str]) -> dict[str, str]:
         attributes = {}
         attributes_list_count = len(attributes_list)

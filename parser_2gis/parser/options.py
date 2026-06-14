@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, NonNegativeInt, PositiveInt
+from pydantic import BaseModel, ConfigDict, NonNegativeInt, PositiveInt
 
 from ..chrome.options import default_memory_limit
 from ..common import floor_to_hundreds
@@ -27,3 +27,4 @@ class ParserOptions(BaseModel):
     max_records: PositiveInt = default_max_records()
     use_gc: bool = False
     gc_pages_interval: PositiveInt = 10
+    model_config = ConfigDict(validate_assignment=True)

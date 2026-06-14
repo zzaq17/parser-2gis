@@ -4,7 +4,7 @@ import pathlib
 from typing import Optional
 
 import psutil
-from pydantic import BaseModel, PositiveInt
+from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from ..common import floor_to_hundreds
 
@@ -32,3 +32,4 @@ class ChromeOptions(BaseModel):
     disable_images: bool = True
     silent_browser: bool = True
     memory_limit: PositiveInt = default_memory_limit()
+    model_config = ConfigDict(validate_assignment=True)

@@ -16,7 +16,7 @@ class ArgumentHelpFormatter(argparse.HelpFormatter):
     """Help message formatter which adds default values to argument help."""
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._default_config = Configuration().dict()
+        self._default_config = Configuration().model_dump()
 
     def _get_default_value(self, dest: str) -> Any:
         if dest == 'version':

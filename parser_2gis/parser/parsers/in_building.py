@@ -109,8 +109,10 @@ class InBuildingParser(MainParser):
                     data = self._chrome_remote.get_response_body(resp, timeout=10) if resp else None
 
                     try:
+                        if not isinstance(data, (str, bytes, bytearray)):
+                            raise TypeError
                         doc = json.loads(data)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, TypeError):
                         logger.error('Сервер вернул некорректный JSON документ: "%s", пропуск позиции.', data)
                         doc = None
                 else:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import codecs
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CSVOptions(BaseModel):
@@ -17,9 +17,11 @@ class CSVOptions(BaseModel):
         remove_duplicates: Remove duplicates after parsing process finished.
         join_char: Char for joining complex values.
     """
+    model_config = ConfigDict(validate_assignment=True)
+
     add_rubrics: bool = True
     add_comments: bool = True
-    columns_per_entity: int = Field(3, gt=0, le=5)
+    columns_per_entity: int = Field(default=3, gt=0, le=5)
     remove_empty_columns: bool = True
     remove_duplicates: bool = True
     join_char: str = '; '
@@ -32,11 +34,14 @@ class WriterOptions(BaseModel):
        encoding: Encoding of output document.
        verbose: Echo to stdout parsing item's name.
     """
+    model_config = ConfigDict(validate_assignment=True)
+
     encoding: str = 'utf-8-sig'
     verbose: bool = True
-    csv: CSVOptions = CSVOptions()
+    csv: CSVOptions = Field(default_factory=lambda: CSVOptions())
 
-    @validator('encoding')
+    @field_validator('encoding')
+    @classmethod
     def encoding_exists(cls, v: str) -> str:
         """Determine if `encoding` exists."""
         try:

@@ -88,7 +88,7 @@ if __name__ == '__main__':
         author_email='interlark@gmail.com',
         packages=[PACKAGE_NAME],
         include_package_data=True,
-        python_requires='>=3.8',
+        python_requires='>=3.9',
         keywords='parser scraper 2gis',
         url='https://github.com/interlark/parser-2gis',
         project_urls={
@@ -98,7 +98,7 @@ if __name__ == '__main__':
         },
         install_requires=[
             'pychrome==0.2.4',
-            'pydantic>=1.9.0,<2.0',
+            'pydantic>=2.0,<3.0',
             'psutil>=5.4.8',
             'requests>=2.13.0',
             'xlsxwriter>=3.0.5',
@@ -125,7 +125,6 @@ if __name__ == '__main__':
             "Topic :: Utilities",
             "Operating System :: OS Independent",
             "Programming Language :: Python :: 3 :: Only",
-            "Programming Language :: Python :: 3.8",
             "Programming Language :: Python :: 3.9",
             "Programming Language :: Python :: 3.10",
             "Programming Language :: Python :: 3.11",

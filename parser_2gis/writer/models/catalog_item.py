@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .address import Address
 from .adm_div_item import AdmDivItem
@@ -29,13 +29,13 @@ class CatalogItem(BaseModel):
     address_name: Optional[str] = None
 
     # Принадлежность к административной территории
-    adm_div: List[AdmDivItem] = []
+    adm_div: List[AdmDivItem] = Field(default_factory=list)
 
     # Алиас города, в котором находится объект (например "perm")
     city_alias: Optional[str] = None
 
     # Контакты филиала
-    contact_groups: List[ContactGroup] = []
+    contact_groups: List[ContactGroup] = Field(default_factory=list)
 
     # Текущая локаль для региона (например "ru_RU")
     locale: str
@@ -62,7 +62,7 @@ class CatalogItem(BaseModel):
     segment_id: Optional[str] = None
 
     # Рубрики филиала
-    rubrics: List[Rubric] = []
+    rubrics: List[Rubric] = Field(default_factory=list)
 
     # Время работы
     schedule: Optional[Schedule] = None

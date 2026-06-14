@@ -47,7 +47,7 @@ jobs:
         python -m pip install -e .[gui,dev]
         # Replace pydantic with no-binary version to lightweight target binary a bit
         # python -m pip uninstall -y pydantic
-        # python -m pip install --no-binary pydantic pydantic>=1.9.0
+        # python -m pip install --no-binary pydantic "pydantic>=2.0,<3.0"
 
     - name: Build standalone app
       run: |
