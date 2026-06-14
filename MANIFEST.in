@@ -1,2 +1,3 @@
-graft parser_2gis
+graft stage1_2gis
+include README.md LICENSE pyproject.toml
 recursive-exclude * *.pyc *.pyo *.swo *.swp

@@ -38,6 +38,7 @@ testdata = [
 ]
 
 
+@pytest.mark.live
 @pytest.mark.parametrize('format, result_checker', testdata)
 def test_parser(monkeypatch, format, result_checker, num_records=5):
     """Parse TOP `num_records` entries and check result file.

@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stage1-2gis"
+version = "0.1.0"
+description = "Server-side 2GIS acquisition worker for the contacts pipeline"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = {text = "LGPL-3.0-or-later"}
+dependencies = [
+    "playwright==1.60.0",
+    "psutil>=5.9,<8",
+    "psycopg[binary]>=3.2,<3.3",
+    "pydantic>=2.13,<3",
+]
+
+[project.optional-dependencies]
+legacy = [
+    "pychrome==0.2.4",
+    "requests>=2.31,<3",
+    "xlsxwriter>=3.2,<4",
+]
+dev = [
+    "mypy>=1.10,<2",
+    "pytest>=8,<10",
+    "ruff>=0.11,<1",
+]
+
+[project.scripts]
+stage1-2gis = "stage1_2gis.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stage1_2gis*"]
+exclude = ["parser_2gis*"]
+
+[tool.setuptools.package-data]
+stage1_2gis = ["sql/*.sql", "py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "--capture=no --color=yes -m 'not live'"
+markers = [
+    "live: requires a real browser and network access",
+]
+
+[tool.ruff]
+line-length = 130
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+files = ["stage1_2gis"]
