@@ -5,6 +5,28 @@
 </p>
 <h1 align="center">Parser2GIS</h1>
 
+## Server-side Stage 1
+
+The repository includes `stage1_2gis`, a PostgreSQL-backed acquisition worker
+for Debian 13. It uses Pydantic 2 and a Playwright-managed Chromium, stores
+every catalog item immediately, and claims jobs through PostgreSQL.
+
+```bash
+python -m stage1_2gis migrate
+python -m stage1_2gis create-run
+python -m stage1_2gis create-job \
+  --run-id <uuid> \
+  --city-key moscow \
+  --query-key dentistry \
+  --url "https://2gis.ru/moscow/search/стоматологии" \
+  --max-records 100
+python -m stage1_2gis browser-worker
+```
+
+See `deploy/README.md` for native systemd deployment and the browser update
+procedure. The original desktop source remains in the repository for migration
+reference, but it is not included in the production Stage 1 wheel.
+
 <p align="center">
   <a href="https://github.com/interlark/parser-2gis/actions/workflows/tests.yml"><img src="https://github.com/interlark/parser-2gis/actions/workflows/tests.yml/badge.svg" alt="Tests"/></a>
   <a href="https://pypi.org/project/parser-2gis"><img src="https://badgen.net/pypi/v/parser-2gis" alt="PyPi version"/></a>
