@@ -26,6 +26,7 @@ printf '%s\n' "$job_result"
 run_id=$(printf '%s' "$job_result" | "$python_bin" -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
 xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
   "$python_bin" -m stage1_2gis process-run --run-id "$run_id"
+"$python_bin" -m stage1_2gis run-status --run-id "$run_id"
 
 if [[ "$apply" == "--apply" ]]; then
   "$python_bin" -m stage1_2gis export-ready-candidates --credentials-path "$GOOGLE_APPLICATION_CREDENTIALS" --apply

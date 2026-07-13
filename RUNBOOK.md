@@ -51,6 +51,20 @@ The browser is launched through Xvfb. It runs in normal headed mode but no
 window is shown in Windows. The pipeline processes only its own generated
 run, not another queued run.
 
+## Progress telemetry
+
+Every URL job updates its persisted status and received-card count. While a
+run is active, inspect its progress from another terminal:
+
+```bash
+../.venv/bin/python -m stage1_2gis run-status --run-id RUN_ID
+watch -n 5 '../.venv/bin/python -m stage1_2gis run-status --run-id RUN_ID'
+```
+
+The JSON includes `progress_percent`, queued/running/retry/partial/completed
+and failed job counts, received cards, companies, domains, and timestamps.
+`process-run` also writes one progress log line after each completed URL job.
+
 To use another city JSON file:
 
 ```bash

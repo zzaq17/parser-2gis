@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("browser-worker", help="Run the PostgreSQL-backed browser worker")
     process_run = commands.add_parser("process-run", help="Process queued browser jobs from one run, then exit")
     process_run.add_argument("--run-id", required=True)
+    run_status = commands.add_parser("run-status", help="Print persisted progress and result counts for one run")
+    run_status.add_argument("--run-id", required=True)
 
     google_sync = commands.add_parser("sync-google-domains", help="Snapshot Google Sheets domains for Stage 1 deduplication")
     google_sync.add_argument("--spreadsheet-id", default=os.environ.get("STAGE1_SPREADSHEET_ID"))
@@ -148,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "process-run":
         print(json.dumps({"status": "success", "processed_jobs": worker.process_run(args.run_id), "run_id": args.run_id}))
+        return 0
+    if args.command == "run-status":
+        status = repository.get_run_status(args.run_id)
+        if status is None:
+            print(json.dumps({"status": "not_found", "run_id": args.run_id}))
+            return 1
+        print(json.dumps({"run_id": args.run_id, **status}, default=str))
         return 0
 
     run_id = str(uuid.uuid4())

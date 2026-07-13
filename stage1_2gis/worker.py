@@ -84,6 +84,16 @@ class Stage1Worker:
                 return processed
             self.process_job(job)
             processed += 1
+            progress = self._repository.get_run_status(run_id)
+            if progress:
+                LOGGER.info(
+                    "Stage 1 progress run=%s completed=%s/%s failed=%s items=%s",
+                    run_id,
+                    progress["completed_jobs"],
+                    progress["generated_jobs"],
+                    progress["failed_jobs"],
+                    progress["items_received"],
+                )
         return processed
 
     def process_job(self, job: UrlJob) -> WorkerResult:

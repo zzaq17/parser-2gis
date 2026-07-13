@@ -98,6 +98,37 @@ class Stage1Repository:
                 [(domain, spreadsheet_id) for domain in domains],
             )
 
+    def get_run_status(self, run_id: str) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT run.status, run.generated_url_count, run.completed_url_count, run.failed_url_count,
+                       run.companies_count, run.domains_count, run.started_at, run.finished_at,
+                       count(job.job_id) FILTER (WHERE job.status = 'queued') AS queued_jobs,
+                       count(job.job_id) FILTER (WHERE job.status = 'running') AS running_jobs,
+                       count(job.job_id) FILTER (WHERE job.status = 'retry_wait') AS retry_jobs,
+                       count(job.job_id) FILTER (WHERE job.status = 'partial') AS partial_jobs,
+                       coalesce(sum(job.items_received), 0) AS items_received
+                FROM stage1_2gis.runs AS run
+                LEFT JOIN stage1_2gis.url_jobs AS job ON job.run_id = run.run_id
+                WHERE run.run_id = %s
+                GROUP BY run.run_id
+                """,
+                (run_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = (
+            "status", "generated_jobs", "completed_jobs", "failed_jobs", "companies", "domains",
+            "started_at", "finished_at", "queued_jobs", "running_jobs", "retry_jobs", "partial_jobs", "items_received",
+        )
+        result = dict(zip(columns, row, strict=True))
+        total = result["generated_jobs"]
+        result["progress_percent"] = round(100 * (result["completed_jobs"] + result["failed_jobs"]) / total, 1) if total else 0.0
+        return result
+
     def create_run(self, *, run_id: str, command_id: str | None = None, snapshot: dict[str, Any] | None = None) -> None:
         with self._connection() as connection:
             connection.cursor().execute(
