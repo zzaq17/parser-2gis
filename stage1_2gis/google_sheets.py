@@ -8,7 +8,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 SHEET_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
-DOMAIN_SOURCES = (("input_auto", "Ввод", "D"), ("input_analytics", "Ввод", "H"), ("new_domains", "NEW domains", "B"))
 
 
 def normalize_google_domain(value: object) -> str | None:
@@ -39,25 +38,26 @@ class GoogleSheetsQueueClient:
         credentials = service_account.Credentials.from_service_account_file(credentials_path, scopes=SHEET_SCOPES)
         return cls(build("sheets", "v4", credentials=credentials, cache_discovery=False))
 
-    def read_snapshot_rows(self, spreadsheet_id: str) -> list[tuple[str, str, int | None]]:
-        ranges = [f"'{sheet}'!{column}3:{column}" for _, sheet, column in DOMAIN_SOURCES]
+    def read_snapshot_rows(self, spreadsheet_id: str, *, input_sheet: str, new_domains_sheet: str) -> list[tuple[str, str, int | None]]:
+        sources = (("input_auto", input_sheet, "D"), ("input_analytics", input_sheet, "H"), ("new_domains", new_domains_sheet, "B"))
+        ranges = [f"'{sheet}'!{column}3:{column}" for _, sheet, column in sources]
         response = self._service.spreadsheets().values().batchGet(spreadsheetId=spreadsheet_id, ranges=ranges).execute()
         rows: list[tuple[str, str, int | None]] = []
-        for (source_key, _, _), value_range in zip(DOMAIN_SOURCES, response.get("valueRanges", []), strict=True):
+        for (source_key, _, _), value_range in zip(sources, response.get("valueRanges", []), strict=True):
             for offset, row in enumerate(value_range.get("values", []), start=3):
                 domain = normalize_google_domain(row[0] if row else "")
                 if domain:
                     rows.append((source_key, domain, offset))
         return rows
 
-    def append_candidates(self, spreadsheet_id: str, rows: Iterable[dict[str, Any]]) -> int:
+    def append_candidates(self, spreadsheet_id: str, *, new_domains_sheet: str, rows: Iterable[dict[str, Any]]) -> int:
         values = list(rows)
         sheet = self._service.spreadsheets()
-        header = sheet.values().get(spreadsheetId=spreadsheet_id, range="'NEW domains'!I1").execute().get("values", [])
+        header = sheet.values().get(spreadsheetId=spreadsheet_id, range=f"'{new_domains_sheet}'!I1").execute().get("values", [])
         if not header or not header[0] or not str(header[0][0]).strip():
             sheet.values().update(
                 spreadsheetId=spreadsheet_id,
-                range="'NEW domains'!I1",
+                range=f"'{new_domains_sheet}'!I1",
                 valueInputOption="USER_ENTERED",
                 body={"values": [["is_advertised"]]},
             ).execute()
@@ -65,7 +65,7 @@ class GoogleSheetsQueueClient:
             return 0
         response = sheet.values().append(
             spreadsheetId=spreadsheet_id,
-            range="'NEW domains'!A3:E",
+            range=f"'{new_domains_sheet}'!A3:E",
             valueInputOption="USER_ENTERED",
             insertDataOption="INSERT_ROWS",
             body={"values": [[row[key] or "" for key in ("url", "domain", "name", "city", "rubric")] for row in values]},
@@ -74,7 +74,7 @@ class GoogleSheetsQueueClient:
         start_row = int(re.search(r"[A-Z]+(\d+)", updated_range).group(1))
         sheet.values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'NEW domains'!I{start_row}:I{start_row + len(values) - 1}",
+            range=f"'{new_domains_sheet}'!I{start_row}:I{start_row + len(values) - 1}",
             valueInputOption="USER_ENTERED",
             body={"values": [[row["is_advertised"]] for row in values]},
         ).execute()

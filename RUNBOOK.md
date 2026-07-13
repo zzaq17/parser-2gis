@@ -1,0 +1,87 @@
+# Stage 1 Runbook
+
+`stage1_2gis` collects 2GIS cards, keeps normalized domains in PostgreSQL,
+excludes domains already present in Google Sheets, and appends only new
+candidates to `NEW domains`.
+
+## One-time setup
+
+1. Install Python 3.12 and Xvfb.
+2. Create and populate the virtual environment:
+
+```bash
+python3.12 -m venv ../.venv
+../.venv/bin/python -m pip install -e '.[dev]'
+../.venv/bin/python -m playwright install chromium
+```
+
+3. Copy `.env.example` to `.env`. Set all `POSTGRES_*` values, the absolute
+`GOOGLE_APPLICATION_CREDENTIALS` path, `STAGE1_SPREADSHEET_ID`, and the exact
+Google Sheets tab names. Share the spreadsheet with the service-account email.
+4. Put one search phrase per line in `../tasks/queries.txt`. Empty lines and
+lines beginning with `#` are ignored. Cities are read from
+`../tasks/cities_list.json`.
+
+## Validate configuration
+
+```bash
+cd /mnt/f/gsearch/parser-2gis-pydantic2
+../.venv/bin/python -m stage1_2gis migrate
+../.venv/bin/python -m stage1_2gis sync-google-domains
+```
+
+The second command snapshots `Ввод!D`, `Ввод!H`, and `NEW domains!B` in
+`stage1_2gis.google_domain_snapshot`. It does not change the sheet.
+
+## Daily pipeline
+
+Preview only; this does not write to Google Sheets:
+
+```bash
+bash scripts/run_stage1_pipeline.sh ../tasks/queries.txt
+```
+
+After reviewing the JSON preview, append new domains:
+
+```bash
+bash scripts/run_stage1_pipeline.sh ../tasks/queries.txt --apply
+```
+
+The browser is launched through Xvfb. It runs in normal headed mode but no
+window is shown in Windows. The pipeline processes only its own generated
+run, not another queued run.
+
+To use another city JSON file:
+
+```bash
+bash scripts/run_stage1_pipeline.sh ../tasks/queries.txt /absolute/path/cities.json --apply
+```
+
+## Individual commands
+
+```bash
+# Generate one run from cities x TXT phrases.
+../.venv/bin/python scripts/create_jobs_from_cities.py \
+  --cities-list ../tasks/cities_list.json \
+  --queries-file ../tasks/queries.txt
+
+# Process a returned run id invisibly.
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis process-run --run-id RUN_ID
+
+# Inspect candidates after the Google anti-join.
+../.venv/bin/python -m stage1_2gis export-ready-candidates --limit 50
+
+# Append all ready candidates to the configured NEW domains tab.
+../.venv/bin/python -m stage1_2gis export-ready-candidates --apply
+```
+
+## Result and recovery
+
+`stage1_2gis.ready_candidates` contains one candidate per canonical domain,
+ordered by `is_advertised` then domain. Exports are recorded in
+`stage1_2gis.google_exports`, so a second `--apply` does not duplicate rows.
+
+For a failed run, inspect `stage1_2gis.url_jobs.error_code` and
+`error_message`. Re-run `process-run --run-id RUN_ID`; stale jobs are released
+by `browser-worker` according to `STAGE1_STALE_JOB_SECONDS`.

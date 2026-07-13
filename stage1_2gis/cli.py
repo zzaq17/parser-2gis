@@ -40,11 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     process_run.add_argument("--run-id", required=True)
 
     google_sync = commands.add_parser("sync-google-domains", help="Snapshot Google Sheets domains for Stage 1 deduplication")
-    google_sync.add_argument("--spreadsheet-id", required=True)
+    google_sync.add_argument("--spreadsheet-id", default=os.environ.get("STAGE1_SPREADSHEET_ID"))
+    google_sync.add_argument("--input-sheet", default=os.environ.get("STAGE1_INPUT_SHEET", "Ввод"))
+    google_sync.add_argument("--new-domains-sheet", default=os.environ.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
     google_sync.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
 
     google_export = commands.add_parser("export-ready-candidates", help="Append deduplicated Stage 1 candidates to NEW domains")
-    google_export.add_argument("--spreadsheet-id", required=True)
+    google_export.add_argument("--spreadsheet-id", default=os.environ.get("STAGE1_SPREADSHEET_ID"))
+    google_export.add_argument("--new-domains-sheet", default=os.environ.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
     google_export.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
     google_export.add_argument("--limit", type=int, default=None)
     google_export.add_argument("--apply", action="store_true", help="Write rows to Google Sheets; otherwise print the preview")
@@ -108,15 +111,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sync-google-domains":
+        if not args.spreadsheet_id:
+            print("Missing spreadsheet ID: --spreadsheet-id or STAGE1_SPREADSHEET_ID", file=sys.stderr)
+            return 2
         if not args.credentials_path:
             print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
             return 2
         client = GoogleSheetsQueueClient.from_service_account(args.credentials_path)
-        count = repository.replace_google_domain_snapshot(client.read_snapshot_rows(args.spreadsheet_id))
+        count = repository.replace_google_domain_snapshot(client.read_snapshot_rows(args.spreadsheet_id, input_sheet=args.input_sheet, new_domains_sheet=args.new_domains_sheet))
         print(json.dumps({"status": "success", "snapshot_domains": count}, ensure_ascii=False))
         return 0
 
     if args.command == "export-ready-candidates":
+        if not args.spreadsheet_id:
+            print("Missing spreadsheet ID: --spreadsheet-id or STAGE1_SPREADSHEET_ID", file=sys.stderr)
+            return 2
         if args.limit is not None and args.limit <= 0:
             print("--limit must be greater than zero", file=sys.stderr)
             return 2
@@ -128,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
             return 2
         client = GoogleSheetsQueueClient.from_service_account(args.credentials_path)
-        exported = client.append_candidates(args.spreadsheet_id, candidates)
+        exported = client.append_candidates(args.spreadsheet_id, new_domains_sheet=args.new_domains_sheet, rows=candidates)
         repository.mark_google_exports(spreadsheet_id=args.spreadsheet_id, domains=[candidate["domain"] for candidate in candidates])
         print(json.dumps({"status": "success", "exported_count": exported}, ensure_ascii=False))
         return 0
