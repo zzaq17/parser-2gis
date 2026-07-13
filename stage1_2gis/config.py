@@ -23,6 +23,27 @@ def _positive_int(source: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
+def _runtime_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
+    if env is not None:
+        return env
+    source = dict(os.environ)
+    env_file = Path(".env")
+    if not env_file.exists():
+        return source
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key:
+            source.setdefault(key, value)
+    return source
+
+
 @dataclass(slots=True, frozen=True)
 class PostgresSettings:
     host: str
@@ -43,7 +64,7 @@ class PostgresSettings:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> PostgresSettings:
-        source = env or os.environ
+        source = _runtime_env(env)
         missing = [name for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD") if not source.get(name)]
         if missing:
             raise ConfigurationError("Missing PostgreSQL settings: " + ", ".join(sorted(missing)))
@@ -71,7 +92,7 @@ class WorkerSettings:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> WorkerSettings:
-        source = env or os.environ
+        source = _runtime_env(env)
         return cls(
             poll_interval_seconds=_positive_int(source, "STAGE1_POLL_INTERVAL_SECONDS", 5),
             heartbeat_interval_seconds=_positive_int(source, "STAGE1_HEARTBEAT_INTERVAL_SECONDS", 15),

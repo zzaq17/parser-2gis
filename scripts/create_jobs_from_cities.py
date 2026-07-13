@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -14,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CITIES_LIST = REPO_ROOT / "cities_list.json"
 DEFAULT_2GIS_CITIES = PACKAGE_ROOT / "parser_2gis" / "data" / "cities.json"
+DEFAULT_ENV_FILE = PACKAGE_ROOT / ".env"
 DEFAULT_QUERIES = {
     "dental_clinics": "Стоматологические клиники",
     "child_dental_clinics": "Детские стоматологические клиники",
@@ -33,6 +35,23 @@ def load_queries(path: Path) -> dict[str, str]:
     if not queries:
         raise ValueError(f"No search queries found in {path}")
     return queries
+
+
+def load_env_file(path: Path) -> None:
+    """Load a simple .env file without overriding explicitly exported values."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
 
 
 def load_city_names(path: Path) -> list[str]:
@@ -57,6 +76,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cities-list", type=Path, default=DEFAULT_CITIES_LIST)
     parser.add_argument("--city-catalog", type=Path, default=DEFAULT_2GIS_CITIES)
+    parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--queries-file", type=Path, help="UTF-8 TXT: one search phrase per line; blank lines and # comments are ignored")
     parser.add_argument("--run-id", default=str(uuid.uuid4()))
     parser.add_argument("--command-id", default="cities-medical-search")
@@ -64,6 +84,7 @@ def main() -> int:
     parser.add_argument("--limit-cities", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    load_env_file(args.env_file)
     queries = load_queries(args.queries_file) if args.queries_file else DEFAULT_QUERIES
 
     city_names = load_city_names(args.cities_list)
