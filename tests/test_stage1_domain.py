@@ -21,6 +21,8 @@ def test_normalize_catalog_document_preserves_website_mapping():
                     "name_ex": {"primary": "Тест", "extension": "клиника"},
                     "address_name": "Москва, Тестовая улица, 1",
                     "adm_div": [{"name": "Москва", "type": "city"}],
+                    "rubrics": [{"name": "Стоматологии", "kind": "primary"}],
+                    "stat": {"is_advertised": True},
                     "org": {"id": "org-1", "name": "Тест", "branch_count": 1},
                     "contact_groups": [
                         {
@@ -43,6 +45,8 @@ def test_normalize_catalog_document_preserves_website_mapping():
     assert item.two_gis_org_id == "org-1"
     assert item.name == "Тест"
     assert item.city == "Москва"
+    assert item.primary_rubric == "Стоматологии"
+    assert item.is_advertised is True
     assert item.domains == ("example.ru",)
     assert item.website_domains == (("https://www.example.ru/contacts", "example.ru"),)
     assert item.websites == ("https://www.example.ru/contacts", "https://vk.com/test")

@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import uuid
 
 from .browser import PlaywrightBrowserAdapter
 from .config import ConfigurationError, PostgresSettings, WorkerSettings
+from .google_sheets import GoogleSheetsQueueClient
 from .persistence import Stage1Repository, build_connection_factory
 from .worker import Stage1Worker, wait_until_stopped
 
@@ -34,6 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
     create_job.add_argument("--max-records", type=int, default=100)
 
     commands.add_parser("browser-worker", help="Run the PostgreSQL-backed browser worker")
+    process_run = commands.add_parser("process-run", help="Process queued browser jobs from one run, then exit")
+    process_run.add_argument("--run-id", required=True)
+
+    google_sync = commands.add_parser("sync-google-domains", help="Snapshot Google Sheets domains for Stage 1 deduplication")
+    google_sync.add_argument("--spreadsheet-id", required=True)
+    google_sync.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+
+    google_export = commands.add_parser("export-ready-candidates", help="Append deduplicated Stage 1 candidates to NEW domains")
+    google_export.add_argument("--spreadsheet-id", required=True)
+    google_export.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+    google_export.add_argument("--limit", type=int, default=None)
+    google_export.add_argument("--apply", action="store_true", help="Write rows to Google Sheets; otherwise print the preview")
 
     smoke = commands.add_parser("smoke", help="Create and synchronously process one live URL job")
     smoke.add_argument("--url", required=True)
@@ -93,9 +107,38 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "success", "job_id": job_id, "run_id": args.run_id}))
         return 0
 
+    if args.command == "sync-google-domains":
+        if not args.credentials_path:
+            print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
+            return 2
+        client = GoogleSheetsQueueClient.from_service_account(args.credentials_path)
+        count = repository.replace_google_domain_snapshot(client.read_snapshot_rows(args.spreadsheet_id))
+        print(json.dumps({"status": "success", "snapshot_domains": count}, ensure_ascii=False))
+        return 0
+
+    if args.command == "export-ready-candidates":
+        if args.limit is not None and args.limit <= 0:
+            print("--limit must be greater than zero", file=sys.stderr)
+            return 2
+        candidates = repository.list_ready_candidates(args.limit)
+        if not args.apply:
+            print(json.dumps({"status": "preview", "candidate_count": len(candidates), "candidates": candidates}, ensure_ascii=False))
+            return 0
+        if not args.credentials_path:
+            print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
+            return 2
+        client = GoogleSheetsQueueClient.from_service_account(args.credentials_path)
+        exported = client.append_candidates(args.spreadsheet_id, candidates)
+        repository.mark_google_exports(spreadsheet_id=args.spreadsheet_id, domains=[candidate["domain"] for candidate in candidates])
+        print(json.dumps({"status": "success", "exported_count": exported}, ensure_ascii=False))
+        return 0
+
     worker = Stage1Worker(repository, browser, settings)
     if args.command == "browser-worker":
         wait_until_stopped(worker)
+        return 0
+    if args.command == "process-run":
+        print(json.dumps({"status": "success", "processed_jobs": worker.process_run(args.run_id), "run_id": args.run_id}))
         return 0
 
     run_id = str(uuid.uuid4())

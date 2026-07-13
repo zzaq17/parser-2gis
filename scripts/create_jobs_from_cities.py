@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import uuid
@@ -19,6 +20,19 @@ DEFAULT_QUERIES = {
     "ophthalmology_clinics": "Офтальмологические клиники",
     "multidisciplinary_medical_centers": "Многопрофильные медицинские центры",
 }
+
+
+def load_queries(path: Path) -> dict[str, str]:
+    queries: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        query = line.strip()
+        if not query or query.startswith("#"):
+            continue
+        key = f"query-{hashlib.sha256(query.casefold().encode('utf-8')).hexdigest()[:12]}"
+        queries[key] = query
+    if not queries:
+        raise ValueError(f"No search queries found in {path}")
+    return queries
 
 
 def load_city_names(path: Path) -> list[str]:
@@ -43,12 +57,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cities-list", type=Path, default=DEFAULT_CITIES_LIST)
     parser.add_argument("--city-catalog", type=Path, default=DEFAULT_2GIS_CITIES)
+    parser.add_argument("--queries-file", type=Path, help="UTF-8 TXT: one search phrase per line; blank lines and # comments are ignored")
     parser.add_argument("--run-id", default=str(uuid.uuid4()))
     parser.add_argument("--command-id", default="cities-medical-search")
     parser.add_argument("--max-records", type=int, default=100)
     parser.add_argument("--limit-cities", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    queries = load_queries(args.queries_file) if args.queries_file else DEFAULT_QUERIES
 
     city_names = load_city_names(args.cities_list)
     if args.limit_cities is not None:
@@ -62,7 +78,7 @@ def main() -> int:
         if city is None:
             missing.append(city_name)
             continue
-        for query_key, query in DEFAULT_QUERIES.items():
+        for query_key, query in queries.items():
             city_key = city["code"]
             jobs.append((city_key, query_key, build_url(city, query)))
 
@@ -80,7 +96,7 @@ def main() -> int:
     repository.create_run(
         run_id=args.run_id,
         command_id=args.command_id,
-        snapshot={"cities_list": str(args.cities_list), "queries": DEFAULT_QUERIES},
+        snapshot={"cities_list": str(args.cities_list), "queries": queries},
     )
     for city_key, query_key, url in jobs:
         repository.create_job(
@@ -100,4 +116,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except BrokenPipeError:
         sys.stderr.close()
-        raise SystemExit(0)
+        raise SystemExit(0) from None

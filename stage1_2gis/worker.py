@@ -75,6 +75,17 @@ class Stage1Worker:
             self.process_job(job)
         LOGGER.info("Stage 1 worker stopped")
 
+    def process_run(self, run_id: str) -> int:
+        """Process queued jobs from one run and return the number claimed."""
+        processed = 0
+        while not self._stop_event.is_set():
+            job = self._repository.claim_job(run_id)
+            if job is None:
+                return processed
+            self.process_job(job)
+            processed += 1
+        return processed
+
     def process_job(self, job: UrlJob) -> WorkerResult:
         heartbeat = Heartbeat(self._repository, job, self._settings.heartbeat_interval_seconds)
         heartbeat.start()

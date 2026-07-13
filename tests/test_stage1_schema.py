@@ -16,3 +16,13 @@ def test_schema_contains_required_queue_and_result_tables():
         "job_item_occurrences",
     ):
         assert f"stage1_2gis.{table}" in sql
+
+
+def test_schema_exposes_stage3_candidate_view_and_advertising_marker():
+    sql = files("stage1_2gis.sql").joinpath("stage1_schema.sql").read_text(encoding="utf-8")
+
+    assert "is_advertised boolean NOT NULL DEFAULT false" in sql
+    assert "CREATE OR REPLACE VIEW stage1_2gis.stage3_candidates" in sql
+    assert "SELECT url, domain, name, city, rubric, is_advertised" in sql
+    assert "stage1_2gis.google_domain_snapshot" in sql
+    assert "CREATE OR REPLACE VIEW stage1_2gis.ready_candidates" in sql
