@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS stage1_2gis.branches (
     description text,
     address text,
     city text,
+    primary_rubric text,
+    is_advertised boolean NOT NULL DEFAULT false,
     phones_json jsonb NOT NULL DEFAULT '[]'::jsonb,
     emails_json jsonb NOT NULL DEFAULT '[]'::jsonb,
     two_gis_url text NOT NULL,
@@ -112,3 +114,63 @@ CREATE TABLE IF NOT EXISTS stage1_2gis.job_item_occurrences (
     received_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (job_id, two_gis_item_id)
 );
+
+CREATE TABLE IF NOT EXISTS stage1_2gis.google_domain_snapshot (
+    source_key text NOT NULL,
+    normalized_domain text NOT NULL,
+    source_row_number integer,
+    observed_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_key, normalized_domain)
+);
+
+CREATE TABLE IF NOT EXISTS stage1_2gis.google_exports (
+    normalized_domain text PRIMARY KEY,
+    spreadsheet_id text NOT NULL,
+    exported_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Keep existing deployments compatible when the schema is applied after upgrade.
+ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS primary_rubric text;
+ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS is_advertised boolean NOT NULL DEFAULT false;
+
+-- Stable Stage 3 input: one highest-potential 2GIS branch per normalized domain.
+CREATE OR REPLACE VIEW stage1_2gis.stage3_candidates AS
+WITH ranked_candidates AS (
+    SELECT DISTINCT ON (domain.normalized_domain)
+        company_domain.website_url AS url,
+        domain.normalized_domain AS domain,
+        branch.name,
+        branch.city,
+        branch.primary_rubric AS rubric,
+        branch.is_advertised::integer AS is_advertised
+    FROM stage1_2gis.company_domains AS company_domain
+    JOIN stage1_2gis.domains AS domain ON domain.domain_id = company_domain.domain_id
+    JOIN stage1_2gis.company_branches AS company_branch ON company_branch.company_id = company_domain.company_id
+    JOIN stage1_2gis.branches AS branch ON branch.branch_id = company_branch.branch_id
+    WHERE NOT domain.is_excluded
+    ORDER BY
+        domain.normalized_domain,
+        branch.is_advertised DESC,
+        CASE WHEN lower(company_domain.website_url) LIKE 'https://%' THEN 0 ELSE 1 END,
+        branch.last_seen_at DESC,
+        company_domain.last_seen_at DESC,
+        branch.branch_id
+)
+SELECT url, domain, name, city, rubric, is_advertised
+FROM ranked_candidates
+ORDER BY is_advertised DESC, domain;
+
+CREATE OR REPLACE VIEW stage1_2gis.ready_candidates AS
+SELECT candidate.*
+FROM stage1_2gis.stage3_candidates AS candidate
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM stage1_2gis.google_domain_snapshot AS snapshot
+    WHERE snapshot.normalized_domain = candidate.domain
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM stage1_2gis.google_exports AS export
+    WHERE export.normalized_domain = candidate.domain
+)
+ORDER BY candidate.is_advertised DESC, candidate.domain;

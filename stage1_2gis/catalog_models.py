@@ -30,6 +30,15 @@ class ContactGroup(BaseModel):
     contacts: list[Contact] = Field(default_factory=list)
 
 
+class Rubric(BaseModel):
+    name: str
+    kind: str | None = None
+
+
+class CatalogStat(BaseModel):
+    is_advertised: bool = False
+
+
 class CatalogItem(BaseModel):
     id: str
     locale: str
@@ -40,6 +49,8 @@ class CatalogItem(BaseModel):
     address_name: str | None = None
     adm_div: list[AdministrativeDivision] = Field(default_factory=list)
     contact_groups: list[ContactGroup] = Field(default_factory=list)
+    rubrics: list[Rubric] = Field(default_factory=list)
+    stat: CatalogStat = Field(default_factory=CatalogStat)
 
     @property
     def url(self) -> str:

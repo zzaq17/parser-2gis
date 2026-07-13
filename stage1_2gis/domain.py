@@ -72,6 +72,7 @@ def normalize_catalog_document(document: dict) -> NormalizedItem:
                     website_domains.append((contact.url, domain))
 
     city = next((division.name for division in item.adm_div if division.type == "city"), None)
+    primary_rubric = next((rubric.name for rubric in item.rubrics if rubric.kind == "primary"), None)
     name = item.name_ex.primary if item.name_ex else item.name
     description = item.name_ex.extension if item.name_ex else None
     return NormalizedItem(
@@ -81,6 +82,8 @@ def normalize_catalog_document(document: dict) -> NormalizedItem:
         description=description,
         address=item.address_name,
         city=city,
+        primary_rubric=primary_rubric,
+        is_advertised=item.stat.is_advertised,
         phones=tuple(dict.fromkeys(phones)),
         emails=tuple(dict.fromkeys(emails)),
         websites=tuple(dict.fromkeys(websites)),

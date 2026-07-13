@@ -37,6 +37,8 @@ class NormalizedItem(BaseModel):
     description: str | None = None
     address: str | None = None
     city: str | None = None
+    primary_rubric: str | None = None
+    is_advertised: bool = False
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
     websites: tuple[str, ...] = ()

@@ -54,6 +54,50 @@ class Stage1Repository:
         with self._connection() as connection:
             connection.cursor().execute(sql)
 
+    def replace_google_domain_snapshot(self, rows: list[tuple[str, str, int | None]]) -> int:
+        """Replace the three Google-domain sources with one auditable snapshot."""
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM stage1_2gis.google_domain_snapshot")
+            if rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO stage1_2gis.google_domain_snapshot (source_key, normalized_domain, source_row_number)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (source_key, normalized_domain) DO UPDATE
+                    SET source_row_number = EXCLUDED.source_row_number, observed_at = now()
+                    """,
+                    rows,
+                )
+        return len(rows)
+
+    def list_ready_candidates(self, limit: int | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT url, domain, name, city, rubric, is_advertised FROM stage1_2gis.ready_candidates"
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (limit,)
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(sql, params)
+            return [
+                dict(zip(("url", "domain", "name", "city", "rubric", "is_advertised"), row, strict=True))
+                for row in cursor.fetchall()
+            ]
+
+    def mark_google_exports(self, *, spreadsheet_id: str, domains: list[str]) -> None:
+        if not domains:
+            return
+        with self._connection() as connection:
+            connection.cursor().executemany(
+                """
+                INSERT INTO stage1_2gis.google_exports (normalized_domain, spreadsheet_id)
+                VALUES (%s, %s)
+                ON CONFLICT (normalized_domain) DO NOTHING
+                """,
+                [(domain, spreadsheet_id) for domain in domains],
+            )
+
     def create_run(self, *, run_id: str, command_id: str | None = None, snapshot: dict[str, Any] | None = None) -> None:
         with self._connection() as connection:
             connection.cursor().execute(
@@ -136,7 +180,7 @@ class Stage1Repository:
             )
             return recovered
 
-    def claim_job(self) -> UrlJob | None:
+    def claim_job(self, run_id: str | None = None) -> UrlJob | None:
         lock_token = str(uuid.uuid4())
         with self._connection() as connection:
             cursor = connection.cursor()
@@ -148,6 +192,7 @@ class Stage1Repository:
                     WHERE status IN ('queued', 'retry_wait')
                       AND (next_attempt_at IS NULL OR next_attempt_at <= now())
                       AND attempt_no < max_attempts
+                      AND (%s::uuid IS NULL OR run_id = %s::uuid)
                     ORDER BY priority ASC, created_at ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
@@ -166,7 +211,7 @@ class Stage1Repository:
                 RETURNING job.job_id, job.run_id, job.city_key, job.query_key,
                           job.source_url, job.max_records, job.attempt_no, job.lock_token
                 """,
-                (lock_token,),
+                (run_id, run_id, lock_token),
             )
             row = cursor.fetchone()
             if row is not None:
@@ -230,14 +275,16 @@ class Stage1Repository:
                 """
                 INSERT INTO stage1_2gis.branches (
                     branch_id, two_gis_item_id, two_gis_org_id, name, description, address, city,
-                    phones_json, emails_json, two_gis_url, normalized_payload
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    primary_rubric, is_advertised, phones_json, emails_json, two_gis_url, normalized_payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (two_gis_item_id) DO UPDATE
                 SET two_gis_org_id = EXCLUDED.two_gis_org_id,
                     name = EXCLUDED.name,
                     description = EXCLUDED.description,
                     address = EXCLUDED.address,
                     city = EXCLUDED.city,
+                    primary_rubric = EXCLUDED.primary_rubric,
+                    is_advertised = EXCLUDED.is_advertised,
                     phones_json = EXCLUDED.phones_json,
                     emails_json = EXCLUDED.emails_json,
                     normalized_payload = EXCLUDED.normalized_payload,
@@ -251,6 +298,8 @@ class Stage1Repository:
                     item.description,
                     item.address,
                     item.city,
+                    item.primary_rubric,
+                    item.is_advertised,
                     json.dumps(item.phones, ensure_ascii=False),
                     json.dumps(item.emails, ensure_ascii=False),
                     item.two_gis_url,
