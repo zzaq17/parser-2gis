@@ -38,6 +38,21 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("browser-worker", help="Run the PostgreSQL-backed browser worker")
     process_run = commands.add_parser("process-run", help="Process queued browser jobs from one run, then exit")
     process_run.add_argument("--run-id", required=True)
+    resume_run = commands.add_parser(
+        "resume-run",
+        help="Resume interrupted jobs and retry failed/partial jobs from one run",
+    )
+    resume_run.add_argument("--run-id", required=True)
+    resume_run.add_argument(
+        "--skip-errors",
+        action="store_true",
+        help="Continue interrupted and queued jobs without retrying failed/partial jobs",
+    )
+    resume_run.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Requeue jobs but do not start browser processing",
+    )
     run_status = commands.add_parser("run-status", help="Print persisted progress and result counts for one run")
     run_status.add_argument("--run-id", required=True)
 
@@ -150,6 +165,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "process-run":
         print(json.dumps({"status": "success", "processed_jobs": worker.process_run(args.run_id), "run_id": args.run_id}))
+        return 0
+    if args.command == "resume-run":
+        resumed = repository.resume_run(args.run_id, retry_errors=not args.skip_errors)
+        if resumed is None:
+            print(json.dumps({"status": "not_found", "run_id": args.run_id}))
+            return 1
+        processed = 0 if args.prepare_only else worker.process_run(args.run_id)
+        print(json.dumps({
+            "status": "success",
+            "run_id": args.run_id,
+            **resumed,
+            "processed_jobs": processed,
+            "prepared_only": args.prepare_only,
+        }))
         return 0
     if args.command == "run-status":
         status = repository.get_run_status(args.run_id)

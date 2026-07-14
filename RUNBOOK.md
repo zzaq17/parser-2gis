@@ -32,6 +32,8 @@ cd /mnt/f/gsearch/parser-2gis-pydantic2
 
 The second command snapshots `Ввод!D`, `Ввод!H`, and `NEW domains!B` in
 `stage1_2gis.google_domain_snapshot`. It does not change the sheet.
+The migration also canonicalizes legacy `www.example.ru` domain keys to
+`example.ru`; stored website URLs remain unchanged.
 
 ## Daily pipeline
 
@@ -83,6 +85,22 @@ bash scripts/run_stage1_pipeline.sh ../tasks/queries.txt /absolute/path/cities.j
 xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
   ../.venv/bin/python -m stage1_2gis process-run --run-id RUN_ID
 
+# Resume an interrupted run, including failed and partial jobs.
+# Stop the previous worker before running this command.
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-run --run-id RUN_ID
+
+# Only rebuild the queue; do not launch browser processing.
+../.venv/bin/python -m stage1_2gis resume-run \
+  --run-id RUN_ID \
+  --prepare-only
+
+# Continue queued/interrupted jobs without retrying failed/partial jobs.
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-run \
+  --run-id RUN_ID \
+  --skip-errors
+
 # Inspect candidates after the Google anti-join.
 ../.venv/bin/python -m stage1_2gis export-ready-candidates --limit 50
 
@@ -97,5 +115,21 @@ ordered by `is_advertised` then domain. Exports are recorded in
 `stage1_2gis.google_exports`, so a second `--apply` does not duplicate rows.
 
 For a failed run, inspect `stage1_2gis.url_jobs.error_code` and
-`error_message`. Re-run `process-run --run-id RUN_ID`; stale jobs are released
-by `browser-worker` according to `STAGE1_STALE_JOB_SECONDS`.
+`error_message`. Resume all unfinished jobs and give `failed`/`partial` jobs a
+fresh attempt budget. Stop the old worker first so it cannot process the same
+`running` job concurrently:
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-run --run-id RUN_ID
+```
+
+The command leaves completed jobs unchanged, immediately releases interrupted
+`running` jobs, makes delayed retries runnable, and retries failed/partial
+jobs. Use `--skip-errors` to process only the unfinished queue, or
+`--prepare-only` to rebuild the queue without starting a browser.
+
+If job creation itself was interrupted, rerun `create_jobs_from_cities.py`
+with the same `--run-id` and original arguments first. Job creation is
+idempotent for a run, so existing jobs are retained and only missing city/query
+jobs are added. Then run `resume-run`.

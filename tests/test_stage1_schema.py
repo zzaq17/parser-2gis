@@ -26,3 +26,12 @@ def test_schema_exposes_stage3_candidate_view_and_advertising_marker():
     assert "SELECT url, domain, name, city, rubric, is_advertised" in sql
     assert "stage1_2gis.google_domain_snapshot" in sql
     assert "CREATE OR REPLACE VIEW stage1_2gis.ready_candidates" in sql
+
+
+def test_schema_migrates_legacy_www_domain_keys_without_losing_urls():
+    sql = files("stage1_2gis.sql").joinpath("stage1_schema.sql").read_text(encoding="utf-8")
+
+    assert "canonical.normalized_domain = substring(legacy.normalized_domain FROM 5)" in sql
+    assert "link.website_url" in sql
+    assert "DELETE FROM stage1_2gis.domains AS legacy" in sql
+    assert "UPDATE stage1_2gis.domains" in sql

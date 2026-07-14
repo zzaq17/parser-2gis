@@ -129,6 +129,67 @@ CREATE TABLE IF NOT EXISTS stage1_2gis.google_exports (
     exported_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Canonicalize records created by older builds. Keep the original website_url
+-- in company_domains, but merge domain keys such as www.example.ru into
+-- example.ru so deduplication uses one stable value.
+INSERT INTO stage1_2gis.company_domains (
+    company_id, domain_id, website_url, first_seen_at, last_seen_at
+)
+SELECT
+    link.company_id,
+    canonical.domain_id,
+    link.website_url,
+    link.first_seen_at,
+    link.last_seen_at
+FROM stage1_2gis.domains AS legacy
+JOIN stage1_2gis.domains AS canonical
+  ON canonical.normalized_domain = substring(legacy.normalized_domain FROM 5)
+JOIN stage1_2gis.company_domains AS link ON link.domain_id = legacy.domain_id
+WHERE legacy.normalized_domain LIKE 'www.%'
+ON CONFLICT (company_id, domain_id, website_url) DO UPDATE
+SET first_seen_at = LEAST(stage1_2gis.company_domains.first_seen_at, EXCLUDED.first_seen_at),
+    last_seen_at = GREATEST(stage1_2gis.company_domains.last_seen_at, EXCLUDED.last_seen_at);
+
+DELETE FROM stage1_2gis.domains AS legacy
+USING stage1_2gis.domains AS canonical
+WHERE legacy.normalized_domain LIKE 'www.%'
+  AND canonical.normalized_domain = substring(legacy.normalized_domain FROM 5);
+
+UPDATE stage1_2gis.domains
+SET normalized_domain = substring(normalized_domain FROM 5),
+    last_seen_at = now()
+WHERE normalized_domain LIKE 'www.%';
+
+INSERT INTO stage1_2gis.google_domain_snapshot (
+    source_key, normalized_domain, source_row_number, observed_at
+)
+SELECT
+    source_key,
+    substring(normalized_domain FROM 5),
+    source_row_number,
+    observed_at
+FROM stage1_2gis.google_domain_snapshot
+WHERE normalized_domain LIKE 'www.%'
+ON CONFLICT (source_key, normalized_domain) DO UPDATE
+SET source_row_number = COALESCE(
+        EXCLUDED.source_row_number,
+        stage1_2gis.google_domain_snapshot.source_row_number
+    ),
+    observed_at = GREATEST(stage1_2gis.google_domain_snapshot.observed_at, EXCLUDED.observed_at);
+
+DELETE FROM stage1_2gis.google_domain_snapshot
+WHERE normalized_domain LIKE 'www.%';
+
+INSERT INTO stage1_2gis.google_exports (normalized_domain, spreadsheet_id, exported_at)
+SELECT substring(normalized_domain FROM 5), spreadsheet_id, exported_at
+FROM stage1_2gis.google_exports
+WHERE normalized_domain LIKE 'www.%'
+ON CONFLICT (normalized_domain) DO UPDATE
+SET exported_at = GREATEST(stage1_2gis.google_exports.exported_at, EXCLUDED.exported_at);
+
+DELETE FROM stage1_2gis.google_exports
+WHERE normalized_domain LIKE 'www.%';
+
 -- Keep existing deployments compatible when the schema is applied after upgrade.
 ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS primary_rubric text;
 ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS is_advertised boolean NOT NULL DEFAULT false;

@@ -3,6 +3,7 @@ from stage1_2gis.domain import normalize_catalog_document, normalize_domain
 
 def test_normalize_domain():
     assert normalize_domain("HTTPS://WWW.Example.RU/path?q=1") == "example.ru"
+    assert normalize_domain("www.example.ru") == normalize_domain("example.ru")
     assert normalize_domain("https://пример.рф/contacts") == "xn--e1afmkfd.xn--p1ai"
     assert normalize_domain("https://vk.com/example") is None
     assert normalize_domain("localhost") is None
@@ -50,3 +51,29 @@ def test_normalize_catalog_document_preserves_website_mapping():
     assert item.domains == ("example.ru",)
     assert item.website_domains == (("https://www.example.ru/contacts", "example.ru"),)
     assert item.websites == ("https://www.example.ru/contacts", "https://vk.com/test")
+
+
+def test_www_is_removed_only_from_domain_key():
+    document = {
+        "result": {
+            "items": [{
+                "id": "www_branch",
+                "locale": "ru_RU",
+                "type": "branch",
+                "name": "WWW test",
+                "url": "https://2gis.ru/test",
+                "contact_groups": [{
+                    "contacts": [{
+                        "type": "website",
+                        "value": "www.example.ru",
+                        "url": "https://www.example.ru/catalog?from=2gis",
+                    }],
+                }],
+            }],
+        },
+    }
+
+    item = normalize_catalog_document(document)
+
+    assert item.website_domains == (("https://www.example.ru/catalog?from=2gis", "example.ru"),)
+    assert item.websites == ("https://www.example.ru/catalog?from=2gis",)

@@ -211,6 +211,90 @@ class Stage1Repository:
             )
             return recovered
 
+    def resume_run(self, run_id: str, *, retry_errors: bool = True) -> dict[str, int] | None:
+        """Prepare an interrupted run for immediate processing.
+
+        Completed jobs are deliberately left untouched. Running jobs are safe to
+        release here because this is an explicit operator action for a stopped
+        run. Failed and partial jobs get a fresh attempt budget when requested.
+        """
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT 1 FROM stage1_2gis.runs WHERE run_id = %s FOR UPDATE",
+                (run_id,),
+            )
+            if cursor.fetchone() is None:
+                return None
+
+            cursor.execute(
+                """
+                UPDATE stage1_2gis.url_jobs
+                SET status = 'queued',
+                    attempt_no = CASE
+                        WHEN status IN ('failed', 'partial') THEN 0
+                        ELSE attempt_no
+                    END,
+                    lock_token = NULL,
+                    heartbeat_at = NULL,
+                    next_attempt_at = NULL,
+                    finished_at = NULL,
+                    error_code = NULL,
+                    error_message = NULL,
+                    updated_at = now()
+                WHERE run_id = %s
+                  AND (
+                      status IN ('running', 'retry_wait')
+                      OR (%s AND status IN ('failed', 'partial'))
+                  )
+                """,
+                (run_id, retry_errors),
+            )
+            requeued = cursor.rowcount
+            cursor.execute(
+                """
+                UPDATE stage1_2gis.runs
+                SET status = CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM stage1_2gis.url_jobs
+                            WHERE run_id = %s AND status IN ('queued', 'running', 'retry_wait')
+                        ) THEN 'queued'
+                        ELSE status
+                    END,
+                    completed_url_count = (
+                        SELECT count(*) FROM stage1_2gis.url_jobs
+                        WHERE run_id = %s AND status = 'completed'
+                    ),
+                    failed_url_count = (
+                        SELECT count(*) FROM stage1_2gis.url_jobs
+                        WHERE run_id = %s AND status IN ('failed', 'partial')
+                    ),
+                    finished_at = NULL,
+                    error_summary = NULL,
+                    updated_at = now()
+                WHERE run_id = %s
+                """,
+                (run_id, run_id, run_id, run_id),
+            )
+            cursor.execute(
+                """
+                SELECT
+                    count(*) FILTER (WHERE status = 'queued'),
+                    count(*) FILTER (WHERE status = 'completed'),
+                    count(*) FILTER (WHERE status IN ('failed', 'partial'))
+                FROM stage1_2gis.url_jobs
+                WHERE run_id = %s
+                """,
+                (run_id,),
+            )
+            queued, completed, failed = cursor.fetchone()
+        return {
+            "requeued_jobs": requeued,
+            "queued_jobs": queued,
+            "completed_jobs": completed,
+            "failed_jobs": failed,
+        }
+
     def claim_job(self, run_id: str | None = None) -> UrlJob | None:
         lock_token = str(uuid.uuid4())
         with self._connection() as connection:
