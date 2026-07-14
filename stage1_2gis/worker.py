@@ -18,6 +18,14 @@ from .persistence import Stage1Repository
 LOGGER = logging.getLogger(__name__)
 
 
+class RunHaltedError(RuntimeError):
+    def __init__(self, *, run_id: str, consecutive_errors: int, reason: str) -> None:
+        super().__init__(reason)
+        self.run_id = run_id
+        self.consecutive_errors = consecutive_errors
+        self.reason = reason
+
+
 class Heartbeat:
     def __init__(self, repository: Stage1Repository, job: UrlJob, interval_seconds: int) -> None:
         self.repository = repository
@@ -64,6 +72,7 @@ class Stage1Worker:
     def run_forever(self) -> None:
         self.install_signal_handlers()
         LOGGER.info("Stage 1 worker started")
+        consecutive_browser_errors = 0
         while not self._stop_event.is_set():
             recovered = self._repository.recover_stale_jobs(self._settings.stale_job_seconds)
             if recovered:
@@ -72,18 +81,38 @@ class Stage1Worker:
             if job is None:
                 self._stop_event.wait(self._settings.poll_interval_seconds)
                 continue
-            self.process_job(job)
+            result = self.process_job(job)
+            consecutive_browser_errors = self._next_browser_error_count(
+                consecutive_browser_errors, result
+            )
+            if consecutive_browser_errors >= self._settings.consecutive_browser_error_limit:
+                reason = self._browser_error_halt_reason(consecutive_browser_errors, result)
+                self._repository.halt_run(job.run_id, reason)
+                LOGGER.error("Stage 1 worker halted: %s", reason)
+                self._stop_event.set()
         LOGGER.info("Stage 1 worker stopped")
 
     def process_run(self, run_id: str) -> int:
         """Process queued jobs from one run and return the number claimed."""
         processed = 0
+        consecutive_browser_errors = 0
         while not self._stop_event.is_set():
             job = self._repository.claim_job(run_id)
             if job is None:
                 return processed
-            self.process_job(job)
+            result = self.process_job(job)
             processed += 1
+            consecutive_browser_errors = self._next_browser_error_count(
+                consecutive_browser_errors, result
+            )
+            if consecutive_browser_errors >= self._settings.consecutive_browser_error_limit:
+                reason = self._browser_error_halt_reason(consecutive_browser_errors, result)
+                self._repository.halt_run(run_id, reason)
+                raise RunHaltedError(
+                    run_id=run_id,
+                    consecutive_errors=consecutive_browser_errors,
+                    reason=reason,
+                )
             progress = self._repository.get_run_status(run_id)
             if progress:
                 LOGGER.info(
@@ -95,6 +124,21 @@ class Stage1Worker:
                     progress["items_received"],
                 )
         return processed
+
+    @staticmethod
+    def _next_browser_error_count(current: int, result: WorkerResult) -> int:
+        if result.error_code and (
+            result.error_code.startswith("browser_") or result.error_code == "captcha_detected"
+        ):
+            return current + 1
+        return 0
+
+    @staticmethod
+    def _browser_error_halt_reason(count: int, result: WorkerResult) -> str:
+        return (
+            f"Stopped after {count} consecutive browser errors. "
+            f"Last error: {result.error_code}: {result.error_message}"
+        )
 
     def process_job(self, job: UrlJob) -> WorkerResult:
         heartbeat = Heartbeat(self._repository, job, self._settings.heartbeat_interval_seconds)

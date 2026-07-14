@@ -85,6 +85,7 @@ class WorkerSettings:
     heartbeat_interval_seconds: int = 15
     stale_job_seconds: int = 300
     max_attempts: int = 3
+    consecutive_browser_error_limit: int = 3
     browser_timeout_seconds: int = 120
     artifacts_dir: Path = Path("/var/lib/stage1-2gis/artifacts")
     disable_images: bool = True
@@ -98,6 +99,9 @@ class WorkerSettings:
             heartbeat_interval_seconds=_positive_int(source, "STAGE1_HEARTBEAT_INTERVAL_SECONDS", 15),
             stale_job_seconds=_positive_int(source, "STAGE1_STALE_JOB_SECONDS", 300),
             max_attempts=_positive_int(source, "STAGE1_MAX_ATTEMPTS", 3),
+            consecutive_browser_error_limit=_positive_int(
+                source, "STAGE1_CONSECUTIVE_BROWSER_ERROR_LIMIT", 3
+            ),
             browser_timeout_seconds=_positive_int(source, "STAGE1_BROWSER_TIMEOUT_SECONDS", 120),
             artifacts_dir=Path(source.get("STAGE1_ARTIFACTS_DIR", "/var/lib/stage1-2gis/artifacts")),
             disable_images=source.get("STAGE1_DISABLE_IMAGES", "1").lower() not in {"0", "false", "no"},

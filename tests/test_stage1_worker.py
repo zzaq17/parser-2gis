@@ -3,7 +3,7 @@ from pathlib import Path
 from stage1_2gis.browser import BrowserTimeoutError
 from stage1_2gis.config import WorkerSettings
 from stage1_2gis.models import UrlJob
-from stage1_2gis.worker import Stage1Worker
+from stage1_2gis.worker import RunHaltedError, Stage1Worker
 
 
 def catalog_document(item_id: str = "123_branch") -> dict:
@@ -106,3 +106,35 @@ def test_last_attempt_becomes_failed():
 
     assert result.status == "failed"
     assert repository.finished[0][1]["status"] == "failed"
+
+
+class ConsecutiveFailureRepository(FakeRepository):
+    def __init__(self):
+        super().__init__()
+        self.jobs = [job(attempt_no=1), job(attempt_no=2), job(attempt_no=3)]
+        self.halted = []
+
+    def claim_job(self, _run_id):
+        return self.jobs.pop(0) if self.jobs else None
+
+    def get_run_status(self, _run_id):
+        return None
+
+    def halt_run(self, run_id, reason):
+        self.halted.append((run_id, reason))
+
+
+def test_process_run_halts_after_consecutive_browser_errors():
+    repository = ConsecutiveFailureRepository()
+    worker = Stage1Worker(repository, FailingBrowser(), settings(max_attempts=3))
+
+    try:
+        worker.process_run(job().run_id)
+    except RunHaltedError as error:
+        assert error.consecutive_errors == 3
+        assert "browser_timeout" in error.reason
+    else:
+        raise AssertionError("run should have been halted")
+
+    assert len(repository.finished) == 3
+    assert repository.halted[0][0] == job().run_id

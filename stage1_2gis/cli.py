@@ -13,7 +13,7 @@ from .browser import PlaywrightBrowserAdapter
 from .config import ConfigurationError, PostgresSettings, WorkerSettings
 from .google_sheets import GoogleSheetsQueueClient
 from .persistence import Stage1Repository, build_connection_factory
-from .worker import Stage1Worker, wait_until_stopped
+from .worker import RunHaltedError, Stage1Worker, wait_until_stopped
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,14 +164,35 @@ def main(argv: list[str] | None = None) -> int:
         wait_until_stopped(worker)
         return 0
     if args.command == "process-run":
-        print(json.dumps({"status": "success", "processed_jobs": worker.process_run(args.run_id), "run_id": args.run_id}))
+        try:
+            processed = worker.process_run(args.run_id)
+        except RunHaltedError as error:
+            print(json.dumps({
+                "status": "halted",
+                "run_id": error.run_id,
+                "consecutive_browser_errors": error.consecutive_errors,
+                "reason": error.reason,
+                "artifacts_dir": str(settings.artifacts_dir.resolve()),
+            }, ensure_ascii=False))
+            return 1
+        print(json.dumps({"status": "success", "processed_jobs": processed, "run_id": args.run_id}))
         return 0
     if args.command == "resume-run":
         resumed = repository.resume_run(args.run_id, retry_errors=not args.skip_errors)
         if resumed is None:
             print(json.dumps({"status": "not_found", "run_id": args.run_id}))
             return 1
-        processed = 0 if args.prepare_only else worker.process_run(args.run_id)
+        try:
+            processed = 0 if args.prepare_only else worker.process_run(args.run_id)
+        except RunHaltedError as error:
+            print(json.dumps({
+                "status": "halted",
+                "run_id": error.run_id,
+                "consecutive_browser_errors": error.consecutive_errors,
+                "reason": error.reason,
+                "artifacts_dir": str(settings.artifacts_dir.resolve()),
+            }, ensure_ascii=False))
+            return 1
         print(json.dumps({
             "status": "success",
             "run_id": args.run_id,

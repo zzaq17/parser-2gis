@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -30,6 +32,16 @@ class BrowserContractError(BrowserError):
 
 class BrowserTimeoutError(BrowserError):
     error_code = "browser_timeout"
+
+
+class BrowserCaptchaError(BrowserError):
+    error_code = "captcha_detected"
+
+
+_CAPTCHA_PATTERN = re.compile(
+    r"captcha|капч|подтвердите.{0,30}(что вы|человек)|робот|unusual traffic|access denied",
+    re.IGNORECASE,
+)
 
 
 class BrowserAdapter(Protocol):
@@ -161,9 +173,23 @@ class PlaywrightBrowserAdapter:
                         self._raise_callback_error(callback_errors)
                         if clicked_on_page == 0:
                             break
-                except Exception:
-                    self._write_failure_artifacts(context, page, trace_path, screenshot_path)
-                    raise
+                except Exception as error:
+                    artifact_paths = self._write_failure_artifacts(
+                        context,
+                        page,
+                        trace_path,
+                        screenshot_path,
+                        url=url,
+                        error=error,
+                    )
+                    detail = f"{error}; debug artifacts: {', '.join(str(path) for path in artifact_paths)}"
+                    if self._page_looks_like_captcha(page):
+                        raise BrowserCaptchaError(detail) from error
+                    if isinstance(error, BrowserError):
+                        raise type(error)(detail) from error
+                    if isinstance(error, PlaywrightTimeoutError):
+                        raise BrowserTimeoutError(detail) from error
+                    raise BrowserError(detail) from error
                 else:
                     context.tracing.stop()
                 finally:
@@ -193,15 +219,62 @@ class PlaywrightBrowserAdapter:
             elapsed += 250
 
     @staticmethod
-    def _write_failure_artifacts(context: Any, page: Any, trace_path: Path, screenshot_path: Path) -> None:
+    def _page_looks_like_captcha(page: Any) -> bool:
+        try:
+            text = f"{page.title()}\n{page.locator('body').inner_text(timeout=2_000)}"
+        except Exception:
+            return False
+        return bool(_CAPTCHA_PATTERN.search(text))
+
+    @staticmethod
+    def _write_failure_artifacts(
+        context: Any,
+        page: Any,
+        trace_path: Path,
+        screenshot_path: Path,
+        *,
+        url: str,
+        error: Exception,
+    ) -> list[Path]:
+        written: list[Path] = []
         if context is not None:
             try:
                 context.tracing.stop(path=trace_path)
+                written.append(trace_path)
             except Exception:
                 LOGGER.exception("Unable to save browser failure trace")
         if page is None:
-            return
+            return written
         try:
             page.screenshot(path=screenshot_path, full_page=True)
+            written.append(screenshot_path)
         except Exception:
             LOGGER.exception("Unable to save browser failure screenshot")
+        html_path = screenshot_path.with_suffix(".html")
+        try:
+            html_path.write_text(page.content(), encoding="utf-8")
+            written.append(html_path)
+        except Exception:
+            LOGGER.exception("Unable to save browser failure HTML")
+        metadata_path = screenshot_path.with_suffix(".json")
+        try:
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "captured_at": datetime.now(UTC).isoformat(),
+                        "requested_url": url,
+                        "page_url": page.url,
+                        "title": page.title(),
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                        "captcha_suspected": PlaywrightBrowserAdapter._page_looks_like_captcha(page),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            written.append(metadata_path)
+        except Exception:
+            LOGGER.exception("Unable to save browser failure metadata")
+        return written

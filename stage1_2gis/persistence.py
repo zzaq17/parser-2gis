@@ -295,6 +295,20 @@ class Stage1Repository:
             "failed_jobs": failed,
         }
 
+    def halt_run(self, run_id: str, reason: str) -> None:
+        with self._connection() as connection:
+            connection.cursor().execute(
+                """
+                UPDATE stage1_2gis.runs
+                SET status = 'halted',
+                    error_summary = %s,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE run_id = %s
+                """,
+                (reason, run_id),
+            )
+
     def claim_job(self, run_id: str | None = None) -> UrlJob | None:
         lock_token = str(uuid.uuid4())
         with self._connection() as connection:

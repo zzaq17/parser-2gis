@@ -67,6 +67,34 @@ The JSON includes `progress_percent`, queued/running/retry/partial/completed
 and failed job counts, received cards, companies, domains, and timestamps.
 `process-run` also writes one progress log line after each completed URL job.
 
+## Browser errors and debug artifacts
+
+Each failed browser attempt writes a debug bundle to `STAGE1_ARTIFACTS_DIR`:
+
+- `JOB_ID-attempt-N.png` — full-page screenshot;
+- `JOB_ID-attempt-N.html` — page HTML for text and selector inspection;
+- `JOB_ID-attempt-N.zip` — Playwright trace, opened with `playwright show-trace`;
+- `JOB_ID-attempt-N.json` — requested/current URLs, page title, error and captcha marker.
+
+Captcha-like page text is classified as `captcha_detected`. After three
+consecutive browser errors (`STAGE1_CONSECUTIVE_BROWSER_ERROR_LIMIT`) the run
+is marked `halted`, browser processing stops, and `process-run`/`resume-run`
+returns exit code 1 with the reason and absolute artifacts directory. Queued
+jobs remain available for a later `resume-run`.
+
+For manual intervention, inspect the debug bundle and stop the old worker.
+Run Chromium in a visible desktop session without `xvfb-run`, resolve the
+block if possible, then continue with:
+
+```bash
+../.venv/bin/python -m stage1_2gis resume-run --run-id RUN_ID
+```
+
+Do not use this manual mode from systemd or an SSH session without a visible
+`DISPLAY`: headed Chromium would still be invisible. Change the consecutive
+error threshold in `.env` only when the debug evidence shows transient errors,
+not a captcha or access block.
+
 To use another city JSON file:
 
 ```bash
