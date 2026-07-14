@@ -139,7 +139,10 @@ xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
 ## Result and recovery
 
 `stage1_2gis.ready_candidates` contains one candidate per canonical domain,
-ordered by `is_advertised` then domain. Exports are recorded in
+ordered by `is_advertised` then domain. Each exported row fills `NEW domains!A:H`:
+`url`, `domain`, `name`, `city`, `rubric`, `is_advertised`, `source`, and export
+date. The source is `2ГИС реклама` for advertised rows and `2ГИС` otherwise.
+Exports are recorded in
 `stage1_2gis.google_exports`, so a second `--apply` does not duplicate rows.
 
 For a failed run, inspect `stage1_2gis.url_jobs.error_code` and
