@@ -5,18 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import uuid
+from collections.abc import Mapping
 
 from .browser import PlaywrightBrowserAdapter
-from .config import ConfigurationError, PostgresSettings, WorkerSettings
+from .config import ConfigurationError, PostgresSettings, WorkerSettings, runtime_env
 from .google_sheets import GoogleSheetsQueueClient
 from .persistence import Stage1Repository, build_connection_factory
 from .worker import RunHaltedError, Stage1Worker, wait_until_stopped
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(env: Mapping[str, str] | None = None) -> argparse.ArgumentParser:
+    source = runtime_env(env)
     parser = argparse.ArgumentParser(prog="stage1-2gis")
     parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     commands = parser.add_subparsers(dest="command", required=True)
@@ -57,15 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_status.add_argument("--run-id", required=True)
 
     google_sync = commands.add_parser("sync-google-domains", help="Snapshot Google Sheets domains for Stage 1 deduplication")
-    google_sync.add_argument("--spreadsheet-id", default=os.environ.get("STAGE1_SPREADSHEET_ID"))
-    google_sync.add_argument("--input-sheet", default=os.environ.get("STAGE1_INPUT_SHEET", "Ввод"))
-    google_sync.add_argument("--new-domains-sheet", default=os.environ.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
-    google_sync.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+    google_sync.add_argument("--spreadsheet-id", default=source.get("STAGE1_SPREADSHEET_ID"))
+    google_sync.add_argument("--input-sheet", default=source.get("STAGE1_INPUT_SHEET", "Ввод"))
+    google_sync.add_argument("--new-domains-sheet", default=source.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
+    google_sync.add_argument("--credentials-path", default=source.get("GOOGLE_APPLICATION_CREDENTIALS"))
 
     google_export = commands.add_parser("export-ready-candidates", help="Append deduplicated Stage 1 candidates to NEW domains")
-    google_export.add_argument("--spreadsheet-id", default=os.environ.get("STAGE1_SPREADSHEET_ID"))
-    google_export.add_argument("--new-domains-sheet", default=os.environ.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
-    google_export.add_argument("--credentials-path", default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+    google_export.add_argument("--spreadsheet-id", default=source.get("STAGE1_SPREADSHEET_ID"))
+    google_export.add_argument("--new-domains-sheet", default=source.get("STAGE1_NEW_DOMAINS_SHEET", "NEW domains"))
+    google_export.add_argument("--credentials-path", default=source.get("GOOGLE_APPLICATION_CREDENTIALS"))
     google_export.add_argument("--limit", type=int, default=None)
     google_export.add_argument("--apply", action="store_true", help="Write rows to Google Sheets; otherwise print the preview")
 

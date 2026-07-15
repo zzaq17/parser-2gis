@@ -23,7 +23,8 @@ def _positive_int(source: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
-def _runtime_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
+def runtime_env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
+    """Return explicit/process settings supplemented by the project .env file."""
     if env is not None:
         return env
     source = dict(os.environ)
@@ -64,7 +65,7 @@ class PostgresSettings:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> PostgresSettings:
-        source = _runtime_env(env)
+        source = runtime_env(env)
         missing = [name for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD") if not source.get(name)]
         if missing:
             raise ConfigurationError("Missing PostgreSQL settings: " + ", ".join(sorted(missing)))
@@ -93,7 +94,7 @@ class WorkerSettings:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> WorkerSettings:
-        source = _runtime_env(env)
+        source = runtime_env(env)
         return cls(
             poll_interval_seconds=_positive_int(source, "STAGE1_POLL_INTERVAL_SECONDS", 5),
             heartbeat_interval_seconds=_positive_int(source, "STAGE1_HEARTBEAT_INTERVAL_SECONDS", 15),
