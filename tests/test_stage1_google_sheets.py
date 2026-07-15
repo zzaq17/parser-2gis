@@ -84,3 +84,19 @@ def test_append_candidates_canonicalizes_and_deduplicates_idn_domains(monkeypatc
 
     assert exported == 1
     assert service.sheets_api.values_api.append_calls[0]["body"]["values"][0][1] == "пример.рф"
+
+
+def test_append_candidates_removes_www_from_exported_domain(monkeypatch):
+    service = _FakeService()
+    monkeypatch.setattr("stage1_2gis.google_sheets.date", type("FixedDate", (), {"today": staticmethod(lambda: __import__("datetime").date(2026, 7, 14))}))
+
+    exported = GoogleSheetsQueueClient(service).append_candidates(
+        "spreadsheet-id",
+        new_domains_sheet="NEW domains",
+        rows=[
+            {"url": "https://www.example.ru/contacts", "domain": "WWW.Example.RU", "name": "WWW", "city": "Москва", "rubric": "Test", "is_advertised": 0},
+        ],
+    )
+
+    assert exported == 1
+    assert service.sheets_api.values_api.append_calls[0]["body"]["values"][0][1] == "example.ru"
