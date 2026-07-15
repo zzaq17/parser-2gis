@@ -4,7 +4,8 @@ from stage1_2gis.domain import normalize_catalog_document, normalize_domain
 def test_normalize_domain():
     assert normalize_domain("HTTPS://WWW.Example.RU/path?q=1") == "example.ru"
     assert normalize_domain("www.example.ru") == normalize_domain("example.ru")
-    assert normalize_domain("https://пример.рф/contacts") == "xn--e1afmkfd.xn--p1ai"
+    assert normalize_domain("https://пример.рф/contacts") == "пример.рф"
+    assert normalize_domain("https://xn--e1afmkfd.xn--p1ai/contacts") == "пример.рф"
     assert normalize_domain("https://vk.com/example") is None
     assert normalize_domain("localhost") is None
     assert normalize_domain("127.0.0.1") is None

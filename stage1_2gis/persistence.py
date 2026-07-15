@@ -11,6 +11,7 @@ from importlib.resources import files
 from typing import Any, Protocol
 
 from .config import PostgresSettings
+from .domain import canonicalize_domain
 from .models import NormalizedItem, UrlJob
 
 
@@ -52,7 +53,105 @@ class Stage1Repository:
     def apply_schema(self) -> None:
         sql = files("stage1_2gis.sql").joinpath("stage1_schema.sql").read_text(encoding="utf-8")
         with self._connection() as connection:
-            connection.cursor().execute(sql)
+            cursor = connection.cursor()
+            cursor.execute(sql)
+            self._canonicalize_stored_domains(cursor)
+
+    @staticmethod
+    def _canonicalize_stored_domains(cursor: Any) -> None:
+        """Merge legacy Punycode keys into their canonical Unicode records."""
+        cursor.execute("SELECT domain_id, normalized_domain FROM stage1_2gis.domains ORDER BY first_seen_at, domain_id")
+        domains = cursor.fetchall()
+        canonical_ids = {
+            domain: domain_id
+            for domain_id, domain in domains
+            if canonicalize_domain(domain) == domain
+        }
+        for domain_id, old_domain in domains:
+            canonical = canonicalize_domain(old_domain)
+            if canonical is None or canonical == old_domain:
+                continue
+            canonical_id = canonical_ids.get(canonical)
+            if canonical_id is None:
+                cursor.execute(
+                    "UPDATE stage1_2gis.domains SET normalized_domain = %s, last_seen_at = now() WHERE domain_id = %s",
+                    (canonical, domain_id),
+                )
+                canonical_ids[canonical] = domain_id
+                continue
+            cursor.execute(
+                """
+                UPDATE stage1_2gis.domains AS canonical
+                SET first_seen_at = LEAST(canonical.first_seen_at, legacy.first_seen_at),
+                    last_seen_at = GREATEST(canonical.last_seen_at, legacy.last_seen_at),
+                    is_excluded = canonical.is_excluded OR legacy.is_excluded,
+                    exclusion_reason = COALESCE(canonical.exclusion_reason, legacy.exclusion_reason)
+                FROM stage1_2gis.domains AS legacy
+                WHERE canonical.domain_id = %s AND legacy.domain_id = %s
+                """,
+                (canonical_id, domain_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO stage1_2gis.company_domains (
+                    company_id, domain_id, website_url, first_seen_at, last_seen_at
+                )
+                SELECT company_id, %s, website_url, first_seen_at, last_seen_at
+                FROM stage1_2gis.company_domains
+                WHERE domain_id = %s
+                ON CONFLICT (company_id, domain_id, website_url) DO UPDATE
+                SET first_seen_at = LEAST(stage1_2gis.company_domains.first_seen_at, EXCLUDED.first_seen_at),
+                    last_seen_at = GREATEST(stage1_2gis.company_domains.last_seen_at, EXCLUDED.last_seen_at)
+                """,
+                (canonical_id, domain_id),
+            )
+            cursor.execute("DELETE FROM stage1_2gis.company_domains WHERE domain_id = %s", (domain_id,))
+            cursor.execute("DELETE FROM stage1_2gis.domains WHERE domain_id = %s", (domain_id,))
+
+        cursor.execute(
+            "SELECT source_key, normalized_domain, source_row_number, observed_at FROM stage1_2gis.google_domain_snapshot"
+        )
+        snapshot_rows = cursor.fetchall()
+        cursor.execute("DELETE FROM stage1_2gis.google_domain_snapshot")
+        normalized_snapshot = [
+            (source_key, canonical, row_number, observed_at)
+            for source_key, domain, row_number, observed_at in snapshot_rows
+            if (canonical := canonicalize_domain(domain)) is not None
+        ]
+        if normalized_snapshot:
+            cursor.executemany(
+                """
+                INSERT INTO stage1_2gis.google_domain_snapshot (
+                    source_key, normalized_domain, source_row_number, observed_at
+                ) VALUES (%s, %s, %s, %s)
+                ON CONFLICT (source_key, normalized_domain) DO UPDATE
+                SET source_row_number = COALESCE(
+                        EXCLUDED.source_row_number,
+                        stage1_2gis.google_domain_snapshot.source_row_number
+                    ),
+                    observed_at = GREATEST(stage1_2gis.google_domain_snapshot.observed_at, EXCLUDED.observed_at)
+                """,
+                normalized_snapshot,
+            )
+
+        cursor.execute("SELECT normalized_domain, spreadsheet_id, exported_at FROM stage1_2gis.google_exports")
+        export_rows = cursor.fetchall()
+        cursor.execute("DELETE FROM stage1_2gis.google_exports")
+        normalized_exports = [
+            (canonical, spreadsheet_id, exported_at)
+            for domain, spreadsheet_id, exported_at in export_rows
+            if (canonical := canonicalize_domain(domain)) is not None
+        ]
+        if normalized_exports:
+            cursor.executemany(
+                """
+                INSERT INTO stage1_2gis.google_exports (normalized_domain, spreadsheet_id, exported_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (normalized_domain) DO UPDATE
+                SET exported_at = GREATEST(stage1_2gis.google_exports.exported_at, EXCLUDED.exported_at)
+                """,
+                normalized_exports,
+            )
 
     def replace_google_domain_snapshot(self, rows: list[tuple[str, str, int | None]]) -> int:
         """Replace the three Google-domain sources with one auditable snapshot."""
@@ -86,7 +185,12 @@ class Stage1Repository:
             ]
 
     def mark_google_exports(self, *, spreadsheet_id: str, domains: list[str]) -> None:
-        if not domains:
+        canonical_domains = list(dict.fromkeys(
+            canonical
+            for domain in domains
+            if (canonical := canonicalize_domain(domain)) is not None
+        ))
+        if not canonical_domains:
             return
         with self._connection() as connection:
             connection.cursor().executemany(
@@ -95,7 +199,7 @@ class Stage1Repository:
                 VALUES (%s, %s)
                 ON CONFLICT (normalized_domain) DO NOTHING
                 """,
-                [(domain, spreadsheet_id) for domain in domains],
+                [(domain, spreadsheet_id) for domain in canonical_domains],
             )
 
     def get_run_status(self, run_id: str) -> dict[str, Any] | None:
@@ -460,9 +564,11 @@ class Stage1Repository:
                     INSERT INTO stage1_2gis.domains (domain_id, normalized_domain)
                     VALUES (%s, %s)
                     ON CONFLICT (normalized_domain) DO UPDATE SET last_seen_at = now()
+                    RETURNING domain_id
                     """,
                     (domain_id, domain),
                 )
+                stored_domain_id = cursor.fetchone()[0]
                 cursor.execute(
                     """
                     INSERT INTO stage1_2gis.company_domains (company_id, domain_id, website_url)
@@ -470,7 +576,7 @@ class Stage1Repository:
                     ON CONFLICT (company_id, domain_id, website_url)
                     DO UPDATE SET last_seen_at = now()
                     """,
-                    (company_id, domain_id, website),
+                    (company_id, stored_domain_id, website),
                 )
             cursor.execute(
                 """

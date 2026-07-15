@@ -3,7 +3,8 @@ from stage1_2gis.google_sheets import GoogleSheetsQueueClient, export_source, no
 
 def test_normalize_google_domain_matches_stage3_domain_key():
     assert normalize_google_domain("HTTPS://WWW.Example.RU/path?q=1") == "example.ru"
-    assert normalize_google_domain("www.пример.рф") == "xn--e1afmkfd.xn--p1ai"
+    assert normalize_google_domain("www.пример.рф") == "пример.рф"
+    assert normalize_google_domain("xn--e1afmkfd.xn--p1ai") == "пример.рф"
     assert normalize_google_domain("-") is None
 
 
@@ -66,3 +67,20 @@ def test_append_candidates_writes_the_new_a_to_h_shape(monkeypatch):
             ["https://organic.example", "organic.example", "Organic", "Kazan", "Test", 0, "2ГИС", "2026-07-14"],
         ]},
     }]
+
+
+def test_append_candidates_canonicalizes_and_deduplicates_idn_domains(monkeypatch):
+    service = _FakeService()
+    monkeypatch.setattr("stage1_2gis.google_sheets.date", type("FixedDate", (), {"today": staticmethod(lambda: __import__("datetime").date(2026, 7, 14))}))
+
+    exported = GoogleSheetsQueueClient(service).append_candidates(
+        "spreadsheet-id",
+        new_domains_sheet="NEW domains",
+        rows=[
+            {"url": "https://xn--e1afmkfd.xn--p1ai", "domain": "xn--e1afmkfd.xn--p1ai", "name": "IDN", "city": "Москва", "rubric": "Test", "is_advertised": 0},
+            {"url": "https://пример.рф", "domain": "пример.рф", "name": "Duplicate", "city": "Москва", "rubric": "Test", "is_advertised": 0},
+        ],
+    )
+
+    assert exported == 1
+    assert service.sheets_api.values_api.append_calls[0]["body"]["values"][0][1] == "пример.рф"

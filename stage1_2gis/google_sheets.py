@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import date
 from typing import Any
-from urllib.parse import urlsplit
+
+from .domain import canonicalize_domain
 
 SHEET_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
 
@@ -16,19 +17,7 @@ def export_source(is_advertised: object) -> str:
 
 
 def normalize_google_domain(value: object) -> str | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    parsed = urlsplit(raw if "://" in raw else f"https://{raw}")
-    domain = (parsed.hostname or "").lower().rstrip(".")
-    if domain.startswith("www."):
-        domain = domain[4:]
-    if not domain or "." not in domain:
-        return None
-    try:
-        return domain.encode("idna").decode("ascii")
-    except UnicodeError:
-        return None
+    return canonicalize_domain(value)
 
 
 class GoogleSheetsQueueClient:
@@ -56,7 +45,14 @@ class GoogleSheetsQueueClient:
         return rows
 
     def append_candidates(self, spreadsheet_id: str, *, new_domains_sheet: str, rows: Iterable[dict[str, Any]]) -> int:
-        values = list(rows)
+        values: list[dict[str, Any]] = []
+        seen_domains: set[str] = set()
+        for row in rows:
+            domain = normalize_google_domain(row.get("domain"))
+            if domain is None or domain in seen_domains:
+                continue
+            seen_domains.add(domain)
+            values.append({**row, "domain": domain})
         sheet = self._service.spreadsheets()
         if not values:
             return 0

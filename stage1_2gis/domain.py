@@ -23,8 +23,9 @@ _EXCLUDED_HOSTS = {
 }
 
 
-def normalize_domain(value: str) -> str | None:
-    candidate = value.strip()
+def canonicalize_domain(value: object) -> str | None:
+    """Return one Unicode domain key for Unicode and Punycode inputs."""
+    candidate = str(value or "").strip()
     if not candidate:
         return None
     parsed = urlsplit(candidate if "://" in candidate else f"https://{candidate}")
@@ -34,14 +35,21 @@ def normalize_domain(value: str) -> str | None:
     if not host or "." not in host:
         return None
     try:
+        ascii_host = host.encode("idna").decode("ascii")
+        return ascii_host.encode("ascii").decode("idna").lower()
+    except UnicodeError:
+        return None
+
+
+def normalize_domain(value: str) -> str | None:
+    host = canonicalize_domain(value)
+    if host is None:
+        return None
+    try:
         ip_address(host)
         return None
     except ValueError:
         pass
-    try:
-        host = host.encode("idna").decode("ascii")
-    except UnicodeError:
-        return None
     if host in _EXCLUDED_HOSTS or any(host.endswith(f".{excluded}") for excluded in _EXCLUDED_HOSTS):
         return None
     return host

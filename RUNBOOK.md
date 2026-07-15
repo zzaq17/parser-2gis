@@ -144,6 +144,9 @@ ordered by `is_advertised` then domain. Each exported row fills `NEW domains!A:H
 date. The source is `2ГИС реклама` for advertised rows and `2ГИС` otherwise.
 Exports are recorded in
 `stage1_2gis.google_exports`, so a second `--apply` does not duplicate rows.
+IDN keys are canonicalized as Unicode (for example, both `пример.рф` and
+`xn--e1afmkfd.xn--p1ai` become `пример.рф`) during parsing, Google snapshot
+sync, migration, and export.
 
 For a failed run, inspect `stage1_2gis.url_jobs.error_code` and
 `error_message`. Resume all unfinished jobs and give `failed`/`partial` jobs a
