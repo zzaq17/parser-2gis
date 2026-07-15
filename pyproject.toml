@@ -19,11 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-legacy = [
-    "pychrome==0.2.4",
-    "requests>=2.31,<3",
-    "xlsxwriter>=3.2,<4",
-]
 dev = [
     "mypy>=1.10,<2",
     "pytest>=8,<10",
@@ -35,10 +30,9 @@ stage1-2gis = "stage1_2gis.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["stage1_2gis*"]
-exclude = ["parser_2gis*"]
 
 [tool.setuptools.package-data]
-stage1_2gis = ["sql/*.sql", "py.typed"]
+stage1_2gis = ["data/*.json", "sql/*.sql", "py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

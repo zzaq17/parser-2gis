@@ -4,9 +4,12 @@ dist/
 .vscode/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 build/
 .tox/
 .mypy_cache/
+.coverage
+htmlcov/
 .env
 .env.*
 !.env.example

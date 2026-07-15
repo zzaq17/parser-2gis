@@ -14,7 +14,7 @@ from urllib.parse import quote
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CITIES_LIST = REPO_ROOT / "cities_list.json"
-DEFAULT_2GIS_CITIES = PACKAGE_ROOT / "parser_2gis" / "data" / "cities.json"
+DEFAULT_2GIS_CITIES = PACKAGE_ROOT / "stage1_2gis" / "data" / "cities.json"
 DEFAULT_ENV_FILE = PACKAGE_ROOT / ".env"
 DEFAULT_QUERIES = {
     "dental_clinics": "Стоматологические клиники",

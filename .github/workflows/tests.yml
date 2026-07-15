@@ -2,62 +2,33 @@ name: Tests
 
 on:
   push:
-    paths-ignore:
-      - 'scripts/**'
-      - 'parser_2gis/data/**'
   pull_request:
-    paths-ignore:
-      - 'scripts/**'
-      - 'parser_2gis/data/**'
 
 jobs:
-  test-python:
-    name: Test Python
-
+  quality:
+    name: Quality
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        python-version: ['3.12', '3.13']
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -e .[dev]
-        python -m pip install tox-gh-actions
-
-    - name: Test with tox
-      run: tox
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .[dev]
+      - run: python -m ruff check stage1_2gis scripts tests
+      - run: python -m mypy stage1_2gis
+      - run: python -m pytest
 
   test-os:
-    name: Test OS
-
+    name: Test ${{ matrix.os }} / Python ${{ matrix.python-version }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-
+        python-version: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -e .[dev]
-
-    - name: Test on ${{ matrix.os }}
-      run: pytest -v
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e .[dev]
+      - run: python -m pytest
