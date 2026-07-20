@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from .browser import BrowserAdapter, BrowserError
 from .config import WorkerSettings
-from .domain import normalize_catalog_document
+from .domain import normalize_catalog_document, resolve_catalog_short_urls
 from .models import UrlJob, WorkerResult
 from .persistence import Stage1Repository
 
@@ -55,10 +55,12 @@ class Stage1Worker:
         repository: Stage1Repository,
         browser: BrowserAdapter,
         settings: WorkerSettings,
+        short_url_resolver=None,
     ) -> None:
         self._repository = repository
         self._browser = browser
         self._settings = settings
+        self._short_url_resolver = short_url_resolver
         self._stop_event = Event()
 
     def request_stop(self, *_args) -> None:
@@ -148,6 +150,13 @@ class Stage1Worker:
         def persist(document: dict) -> None:
             nonlocal items_received
             normalized = normalize_catalog_document(document)
+            if self._short_url_resolver is None:
+                normalized = resolve_catalog_short_urls(normalized)
+            else:
+                normalized = resolve_catalog_short_urls(
+                    normalized,
+                    resolver=self._short_url_resolver,
+                )
             self._repository.persist_item(job, document, normalized)
             items_received += 1
 

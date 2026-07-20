@@ -1,4 +1,5 @@
-from stage1_2gis.domain import normalize_catalog_document, normalize_domain
+from stage1_2gis.domain import normalize_catalog_document, normalize_domain, resolve_catalog_short_urls
+from stage1_2gis.short_urls import ShortUrlResolution, resolve_short_url
 
 
 def test_normalize_domain():
@@ -78,3 +79,100 @@ def test_www_is_removed_only_from_domain_key():
 
     assert item.website_domains == (("https://www.example.ru/catalog?from=2gis", "example.ru"),)
     assert item.websites == ("https://www.example.ru/catalog?from=2gis",)
+
+
+def test_short_url_resolution_keeps_original_and_replaces_domain_mapping():
+    document = {
+        "result": {
+            "items": [{
+                "id": "short_branch",
+                "locale": "ru_RU",
+                "type": "branch",
+                "name": "Short URL test",
+                "url": "https://2gis.ru/test",
+                "contact_groups": [{"contacts": [{
+                    "type": "website",
+                    "value": "clck.ru",
+                    "url": "https://clck.ru/abc123?source=2gis",
+                }]}],
+            }],
+        },
+    }
+    item = normalize_catalog_document(document)
+
+    resolved = resolve_catalog_short_urls(
+        item,
+        resolver=lambda url: ShortUrlResolution(
+            url, "https://real.example.ru/full/path", 2, "resolved"
+        ),
+    )
+
+    assert resolved.websites == ("https://clck.ru/abc123?source=2gis",)
+    assert resolved.domains == ("real.example.ru",)
+    assert resolved.website_domains == (("https://real.example.ru/full/path", "real.example.ru"),)
+    assert resolved.normalized_payload["_short_url_resolutions"][0]["original_domain"] == "clck.ru"
+
+
+def test_failed_short_url_is_not_emitted_as_business_domain():
+    document = {
+        "result": {
+            "items": [{
+                "id": "failed_short_branch",
+                "locale": "ru_RU",
+                "type": "branch",
+                "name": "Failed short URL test",
+                "url": "https://2gis.ru/test",
+                "contact_groups": [{"contacts": [{
+                    "type": "website", "value": "clck.ru", "url": "https://clck.ru/broken",
+                }]}],
+            }],
+        },
+    }
+
+    resolved = resolve_catalog_short_urls(
+        normalize_catalog_document(document),
+        resolver=lambda url: ShortUrlResolution(url, None, 5, "redirect_limit"),
+    )
+
+    assert resolved.domains == ()
+    assert resolved.website_domains == ()
+    assert resolved.normalized_payload["_short_url_resolutions"][0]["status"] == "redirect_limit"
+
+
+def test_resolver_preserves_full_url_and_stops_after_five_redirects():
+    calls: list[str] = []
+    redirects = {
+        "https://clck.ru/a?full=1": (302, "/b?full=2"),
+        "https://clck.ru/b?full=2": (302, "https://tracker.example/3"),
+        "https://tracker.example/3": (302, "https://tracker.example/4"),
+        "https://tracker.example/4": (302, "https://tracker.example/5"),
+        "https://tracker.example/5": (302, "https://real.example/path"),
+        "https://real.example/path": (200, None),
+    }
+
+    def request_once(url: str) -> tuple[int, str | None]:
+        calls.append(url)
+        return redirects[url]
+
+    result = resolve_short_url(
+        "https://clck.ru/a?full=1", max_redirects=5, request_once=request_once
+    )
+
+    assert result.succeeded
+    assert result.final_url == "https://real.example/path"
+    assert result.redirect_count == 5
+    assert calls[0] == "https://clck.ru/a?full=1"
+
+
+def test_resolver_rejects_a_sixth_redirect():
+    def request_once(url: str) -> tuple[int, str | None]:
+        index = int(url.rsplit("/", 1)[-1])
+        return 302, f"https://redirect.example/{index + 1}"
+
+    result = resolve_short_url(
+        "https://clck.ru/0", max_redirects=5, request_once=request_once
+    )
+
+    assert result.status == "redirect_limit"
+    assert result.final_url is None
+    assert result.redirect_count == 5

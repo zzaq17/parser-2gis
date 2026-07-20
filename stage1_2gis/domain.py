@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from .catalog_models import CatalogItem
 from .models import NormalizedItem
+from .short_urls import ShortUrlResolution, is_shortener_url, resolve_short_url
 
 _EXCLUDED_HOSTS = {
     "2gis.ru",
@@ -99,4 +100,45 @@ def normalize_catalog_document(document: dict) -> NormalizedItem:
         website_domains=tuple(dict.fromkeys(website_domains)),
         two_gis_url=item.url,
         normalized_payload=item.model_dump(mode="json", by_alias=True),
+    )
+
+
+def resolve_catalog_short_urls(
+    item: NormalizedItem,
+    *,
+    resolver=resolve_short_url,
+) -> NormalizedItem:
+    """Replace shortener domain mappings while retaining source provenance."""
+
+    mappings: list[tuple[str, str]] = []
+    resolutions: list[dict[str, object]] = []
+    for website_url, domain in item.website_domains:
+        if not is_shortener_url(website_url):
+            mappings.append((website_url, domain))
+            continue
+        result: ShortUrlResolution = resolver(website_url)
+        resolved_domain = normalize_domain(result.final_url or "") if result.succeeded else None
+        if resolved_domain and not is_shortener_url(result.final_url):
+            mappings.append((result.final_url or website_url, resolved_domain))
+        resolutions.append(
+            {
+                "original_url": website_url,
+                "original_domain": domain,
+                "resolved_url": result.final_url,
+                "resolved_domain": resolved_domain,
+                "redirect_count": result.redirect_count,
+                "status": result.status,
+                "error": result.error,
+            }
+        )
+    if not resolutions:
+        return item
+    payload = dict(item.normalized_payload)
+    payload["_short_url_resolutions"] = resolutions
+    return item.model_copy(
+        update={
+            "domains": tuple(dict.fromkeys(domain for _, domain in mappings)),
+            "website_domains": tuple(dict.fromkeys(mappings)),
+            "normalized_payload": payload,
+        }
     )

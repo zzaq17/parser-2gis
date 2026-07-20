@@ -57,6 +57,10 @@ Useful standalone commands:
 IDN domains use Unicode as the canonical key: both `пример.рф` and
 `xn--e1afmkfd.xn--p1ai` are stored and exported as `пример.рф`. A leading
 `www.` is removed from domain keys; original website URLs are preserved.
+Known `clck.ru` links are resolved through at most five redirects before the
+domain is persisted. The original URL stays in the normalized source payload,
+while the final URL/domain mapping is used for candidate export; an unresolved
+shortener is not emitted as a business domain.
 
 ## Development checks
 
