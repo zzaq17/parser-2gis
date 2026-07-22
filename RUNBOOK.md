@@ -51,7 +51,36 @@ bash scripts/run_stage1_pipeline.sh ../tasks/queries.txt --apply
 
 The browser is launched through Xvfb. It runs in normal headed mode but no
 window is shown in Windows. The pipeline processes only its own generated
-run, not another queued run.
+run, not another queued run. Every invocation creates a new `run_id`; therefore
+running the pipeline again (including with `queries-2.txt`) starts a new run
+and does **not** continue a halted one. Because the script uses `set -e`, its
+`--apply` export is not reached if browser processing halts.
+
+## Resume a halted run
+
+Use this procedure to continue the same run without reprocessing completed
+jobs. It requeues interrupted/delayed jobs and retries failed or partial jobs;
+completed jobs are left unchanged. Stop any older worker for this run before
+continuing, so two processes cannot claim the same jobs.
+
+```bash
+cd /mnt/f/gsearch/parser-2gis-pydantic2
+
+# Resume, print the resulting status, and preview ready candidates.
+bash scripts/run_stage1_pipeline_resume.sh 3a00a577-c270-4afc-8546-be08f06b7cc8
+
+# Same, then append ready candidates to Google Sheets after a successful resume.
+bash scripts/run_stage1_pipeline_resume.sh 3a00a577-c270-4afc-8546-be08f06b7cc8 --apply
+```
+
+The script loads `.env`, runs the database migration and Google-domain sync,
+uses Xvfb, and stops before either preview or export if `resume-run` halts.
+Pass the actual run UUID without `<` or `>`.
+
+For a halted browser run, do not invoke `process-run` or `resume-run` directly
+while `STAGE1_HEADED=1`: Chromium needs either Xvfb as above or a real, visible
+`DISPLAY`. To run headlessly instead, set `STAGE1_HEADED=0` explicitly and use
+the same `resume-run` command without `xvfb-run`.
 
 ## Progress telemetry
 
@@ -83,17 +112,17 @@ returns exit code 1 with the reason and absolute artifacts directory. Queued
 jobs remain available for a later `resume-run`.
 
 For manual intervention, inspect the debug bundle and stop the old worker.
-Run Chromium in a visible desktop session without `xvfb-run`, resolve the
-block if possible, then continue with:
+Use the resume procedure above after resolving the problem. For a visual
+investigation, run Chromium only in a desktop session with a real `DISPLAY`;
+otherwise retain `xvfb-run`:
 
 ```bash
-../.venv/bin/python -m stage1_2gis resume-run --run-id RUN_ID
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-run --run-id RUN_ID
 ```
 
-Do not use this manual mode from systemd or an SSH session without a visible
-`DISPLAY`: headed Chromium would still be invisible. Change the consecutive
-error threshold in `.env` only when the debug evidence shows transient errors,
-not a captcha or access block.
+Change the consecutive error threshold in `.env` only when the debug evidence
+shows transient errors, not a captcha or access block.
 
 To use another city JSON file:
 
