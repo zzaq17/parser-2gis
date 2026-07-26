@@ -205,9 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run-status":
         status = repository.get_run_status(args.run_id)
         if status is None:
-            print(json.dumps({"status": "not_found", "run_id": args.run_id}))
+            print(json.dumps({"status": "not_found", "run_id": args.run_id}, indent=2))
             return 1
-        print(json.dumps({"run_id": args.run_id, **status}, default=str))
+        print(json.dumps({"run_id": args.run_id, **status}, default=str, indent=2))
         return 0
 
     run_id = str(uuid.uuid4())

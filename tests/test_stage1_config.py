@@ -1,5 +1,8 @@
+import json
+
 import pytest
 
+from stage1_2gis import cli
 from stage1_2gis.cli import build_parser
 from stage1_2gis.config import ConfigurationError, PostgresSettings, WorkerSettings
 
@@ -42,3 +45,18 @@ def test_google_cli_reads_dotenv_before_resolving_argument_defaults(tmp_path, mo
 
     assert args.spreadsheet_id == "sheet-from-dotenv"
     assert args.credentials_path == str(credentials_path)
+
+
+def test_run_status_prints_pretty_json(monkeypatch, capsys):
+    class Repository:
+        def get_run_status(self, run_id):
+            assert run_id == "run-123"
+            return {"status": "completed", "result_counts": {"companies": 3}}
+
+    monkeypatch.setattr(cli, "_build_runtime", lambda: (Repository(), object(), object()))
+
+    assert cli.main(["run-status", "--run-id", "run-123"]) == 0
+
+    output = capsys.readouterr().out
+    assert output == '{\n  "run_id": "run-123",\n  "status": "completed",\n  "result_counts": {\n    "companies": 3\n  }\n}\n'
+    assert json.loads(output)["result_counts"]["companies"] == 3
