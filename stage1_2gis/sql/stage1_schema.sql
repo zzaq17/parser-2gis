@@ -194,6 +194,15 @@ WHERE normalized_domain LIKE 'www.%';
 ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS primary_rubric text;
 ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS is_advertised boolean NOT NULL DEFAULT false;
 
+-- Sheet-planned runs retain their business grouping independently of later
+-- edits to the planning workbook. The full source snapshot remains in
+-- input_snapshot_json.
+ALTER TABLE stage1_2gis.runs ADD COLUMN IF NOT EXISTS task_vertical text;
+ALTER TABLE stage1_2gis.runs ADD COLUMN IF NOT EXISTS task_subniche text;
+CREATE INDEX IF NOT EXISTS idx_stage1_sheet_task_runs
+    ON stage1_2gis.runs (task_vertical, task_subniche, created_at DESC)
+    WHERE command_id = 'sheet-tasks';
+
 -- Stable Stage 3 input: one highest-potential 2GIS branch per normalized domain.
 CREATE OR REPLACE VIEW stage1_2gis.stage3_candidates AS
 WITH ranked_candidates AS (
@@ -235,3 +244,30 @@ AND NOT EXISTS (
     WHERE export.normalized_domain = candidate.domain
 )
 ORDER BY candidate.is_advertised DESC, candidate.domain;
+
+-- One auditable row per planning run and canonical domain. Query and city keys
+-- are resolved through the run snapshot by the application before publishing
+-- them to the planning workbook.
+CREATE OR REPLACE VIEW stage1_2gis.sheet_task_domain_results AS
+SELECT
+    run.run_id,
+    run.task_vertical,
+    run.task_subniche,
+    domain.normalized_domain AS domain,
+    min(company_domain.website_url) AS url,
+    min(branch.name) AS company_name,
+    min(branch.city) AS city,
+    min(branch.primary_rubric) AS rubric,
+    bool_or(branch.is_advertised) AS is_advertised,
+    array_agg(DISTINCT job.query_key ORDER BY job.query_key) AS query_keys,
+    array_agg(DISTINCT job.city_key ORDER BY job.city_key) AS city_keys,
+    min(occurrence.received_at) AS found_at
+FROM stage1_2gis.runs AS run
+JOIN stage1_2gis.url_jobs AS job ON job.run_id = run.run_id
+JOIN stage1_2gis.job_item_occurrences AS occurrence ON occurrence.job_id = job.job_id
+JOIN stage1_2gis.branches AS branch ON branch.two_gis_item_id = occurrence.two_gis_item_id
+JOIN stage1_2gis.company_branches AS company_branch ON company_branch.branch_id = branch.branch_id
+JOIN stage1_2gis.company_domains AS company_domain ON company_domain.company_id = company_branch.company_id
+JOIN stage1_2gis.domains AS domain ON domain.domain_id = company_domain.domain_id
+WHERE run.command_id = 'sheet-tasks'
+GROUP BY run.run_id, run.task_vertical, run.task_subniche, domain.normalized_domain;

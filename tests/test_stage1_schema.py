@@ -35,3 +35,12 @@ def test_schema_migrates_legacy_www_domain_keys_without_losing_urls():
     assert "link.website_url" in sql
     assert "DELETE FROM stage1_2gis.domains AS legacy" in sql
     assert "UPDATE stage1_2gis.domains" in sql
+
+
+def test_schema_keeps_sheet_task_identity_and_domain_provenance():
+    sql = files("stage1_2gis.sql").joinpath("stage1_schema.sql").read_text(encoding="utf-8")
+
+    assert "task_vertical text" in sql
+    assert "task_subniche text" in sql
+    assert "CREATE OR REPLACE VIEW stage1_2gis.sheet_task_domain_results" in sql
+    assert "array_agg(DISTINCT job.query_key" in sql

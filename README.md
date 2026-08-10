@@ -54,6 +54,30 @@ Useful standalone commands:
 ../.venv/bin/python scripts/export_idn_domain_mapping.py
 ```
 
+## Planning tasks from Google Sheets
+
+Keep the planning workbook separate from the existing downstream queue by
+setting `STAGE1_TASKS_SPREADSHEET_ID`. Share that workbook with the same service
+account as `GOOGLE_APPLICATION_CREDENTIALS`, then initialize it once:
+
+```bash
+../.venv/bin/python -m stage1_2gis init-sheet-tasks --apply
+```
+
+This creates `Города 2GIS`, `Сводка 2GIS`, and `Результаты 2GIS`. Mark cities
+with a checked checkbox or `1`, then mark one or more subniches in `К запуску`.
+Preview the exact runs without writing anything, or create and process them:
+
+```bash
+../.venv/bin/python -m stage1_2gis sheet-tasks
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis sheet-tasks --apply
+../.venv/bin/python -m stage1_2gis sync-sheet-tasks
+```
+
+`sync-sheet-tasks` rebuilds the managed summary and result tabs from PostgreSQL
+after an interruption. It never writes to `STAGE1_SPREADSHEET_ID` or `NEW domains`.
+
 IDN domains use Unicode as the canonical key: both `пример.рф` and
 `xn--e1afmkfd.xn--p1ai` are stored and exported as `пример.рф`. A leading
 `www.` is removed from domain keys; original website URLs are preserved.

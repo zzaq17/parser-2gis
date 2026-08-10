@@ -233,16 +233,69 @@ class Stage1Repository:
         result["progress_percent"] = round(100 * (result["completed_jobs"] + result["failed_jobs"]) / total, 1) if total else 0.0
         return result
 
-    def create_run(self, *, run_id: str, command_id: str | None = None, snapshot: dict[str, Any] | None = None) -> None:
+    def create_run(
+        self,
+        *,
+        run_id: str,
+        command_id: str | None = None,
+        snapshot: dict[str, Any] | None = None,
+        task_vertical: str | None = None,
+        task_subniche: str | None = None,
+    ) -> None:
         with self._connection() as connection:
             connection.cursor().execute(
                 """
-                INSERT INTO stage1_2gis.runs (run_id, command_id, status, input_snapshot_json)
-                VALUES (%s, %s, 'queued', %s)
+                INSERT INTO stage1_2gis.runs (
+                    run_id, command_id, status, input_snapshot_json, task_vertical, task_subniche
+                ) VALUES (%s, %s, 'queued', %s, %s, %s)
                 ON CONFLICT (run_id) DO NOTHING
                 """,
-                (run_id, command_id, json.dumps(snapshot or {}, ensure_ascii=False)),
+                (
+                    run_id,
+                    command_id,
+                    json.dumps(snapshot or {}, ensure_ascii=False),
+                    task_vertical,
+                    task_subniche,
+                ),
             )
+
+    def list_sheet_task_runs(self) -> list[dict[str, Any]]:
+        """Return every planning run; callers choose the latest task per niche."""
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT run_id, task_vertical, task_subniche, status, generated_url_count,
+                       completed_url_count, failed_url_count, companies_count, domains_count,
+                       started_at, finished_at, error_summary, created_at, input_snapshot_json
+                FROM stage1_2gis.runs
+                WHERE command_id = 'sheet-tasks'
+                ORDER BY created_at DESC, run_id DESC
+                """
+            )
+            columns = (
+                "run_id", "vertical", "subniche", "status", "generated_jobs", "completed_jobs",
+                "failed_jobs", "companies", "domains", "started_at", "finished_at", "error_summary",
+                "created_at", "snapshot",
+            )
+            return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+
+    def list_sheet_task_results(self) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                SELECT run_id, task_vertical, task_subniche, domain, url, company_name, city,
+                       rubric, is_advertised, query_keys, city_keys, found_at
+                FROM stage1_2gis.sheet_task_domain_results
+                ORDER BY found_at, run_id, domain
+                """
+            )
+            columns = (
+                "run_id", "vertical", "subniche", "domain", "url", "company_name", "city",
+                "rubric", "is_advertised", "query_keys", "city_keys", "found_at",
+            )
+            return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
 
     def create_job(
         self,

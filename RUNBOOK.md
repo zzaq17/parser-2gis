@@ -96,6 +96,41 @@ The JSON includes `progress_percent`, queued/running/retry/partial/completed
 and failed job counts, received cards, companies, domains, and timestamps.
 `process-run` also writes one progress log line after each completed URL job.
 
+## Google Sheets task planner
+
+The task planner is a different workbook from `STAGE1_SPREADSHEET_ID`. Configure
+`STAGE1_TASKS_SPREADSHEET_ID` and share it with the configured service account;
+do not point it at the `Ввод`/`NEW domains` workbook. Initialize its managed
+tabs once:
+
+```bash
+../.venv/bin/python -m stage1_2gis init-sheet-tasks --apply
+```
+
+On `Города 2GIS`, select cities with a checked checkbox or a literal `1`. On
+`Сводка 2GIS`, mark `К запуску` for each required vertical/subniche. A dry run
+does not create PostgreSQL records or write to Sheets:
+
+```bash
+../.venv/bin/python -m stage1_2gis sheet-tasks
+```
+
+Use Xvfb when the configured browser is headed, as with normal Stage 1 work:
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis sheet-tasks --apply
+```
+
+Each selected subniche becomes a separate run. Its immutable PostgreSQL snapshot
+contains the source rows, phrases and cities. `Результаты 2GIS` is rebuilt from
+the persisted run-to-domain relation; it is not the downstream `NEW domains`
+export. After an interruption or a manual resume, refresh the tabs with:
+
+```bash
+../.venv/bin/python -m stage1_2gis sync-sheet-tasks
+```
+
 ## Browser errors and debug artifacts
 
 Each failed browser attempt writes a debug bundle to `STAGE1_ARTIFACTS_DIR`:

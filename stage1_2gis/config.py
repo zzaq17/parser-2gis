@@ -108,3 +108,28 @@ class WorkerSettings:
             disable_images=source.get("STAGE1_DISABLE_IMAGES", "1").lower() not in {"0", "false", "no"},
             headed=source.get("STAGE1_HEADED", "1").lower() not in {"0", "false", "no"},
         )
+
+
+@dataclass(slots=True, frozen=True)
+class SheetTaskSettings:
+    """Names and location of the 2GIS planning workbook."""
+
+    spreadsheet_id: str
+    phrases_sheet: str = "Ключевые фразы 2GIS"
+    cities_sheet: str = "Города 2GIS"
+    summary_sheet: str = "Сводка 2GIS"
+    results_sheet: str = "Результаты 2GIS"
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> SheetTaskSettings:
+        source = runtime_env(env)
+        spreadsheet_id = source.get("STAGE1_TASKS_SPREADSHEET_ID", "").strip()
+        if not spreadsheet_id:
+            raise ConfigurationError("Missing planning spreadsheet ID: STAGE1_TASKS_SPREADSHEET_ID")
+        return cls(
+            spreadsheet_id=spreadsheet_id,
+            phrases_sheet=source.get("STAGE1_TASKS_PHRASES_SHEET", "Ключевые фразы 2GIS"),
+            cities_sheet=source.get("STAGE1_TASKS_CITIES_SHEET", "Города 2GIS"),
+            summary_sheet=source.get("STAGE1_TASKS_SUMMARY_SHEET", "Сводка 2GIS"),
+            results_sheet=source.get("STAGE1_TASKS_RESULTS_SHEET", "Результаты 2GIS"),
+        )

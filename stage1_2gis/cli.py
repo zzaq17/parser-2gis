@@ -8,11 +8,19 @@ import logging
 import sys
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 
 from .browser import PlaywrightBrowserAdapter
-from .config import ConfigurationError, PostgresSettings, WorkerSettings, runtime_env
+from .config import ConfigurationError, PostgresSettings, SheetTaskSettings, WorkerSettings, runtime_env
 from .google_sheets import GoogleSheetsQueueClient
 from .persistence import Stage1Repository, build_connection_factory
+from .sheet_tasks import (
+    SheetTaskError,
+    execute_marked_sheet_tasks,
+    load_city_catalog,
+    load_city_groups,
+    sync_task_workbook,
+)
 from .worker import RunHaltedError, Stage1Worker, wait_until_stopped
 
 
@@ -69,6 +77,22 @@ def build_parser(env: Mapping[str, str] | None = None) -> argparse.ArgumentParse
     google_export.add_argument("--credentials-path", default=source.get("GOOGLE_APPLICATION_CREDENTIALS"))
     google_export.add_argument("--limit", type=int, default=None)
     google_export.add_argument("--apply", action="store_true", help="Write rows to Google Sheets; otherwise print the preview")
+
+    for command_name, help_text in (
+        ("init-sheet-tasks", "Create and initialize the separate 2GIS planning sheets"),
+        ("sheet-tasks", "Preview or process marked 2GIS sheet tasks"),
+        ("sync-sheet-tasks", "Refresh planning-sheet summaries and results from PostgreSQL"),
+    ):
+        task_command = commands.add_parser(command_name, help=help_text)
+        task_command.add_argument("--credentials-path", default=source.get("GOOGLE_APPLICATION_CREDENTIALS"))
+        if command_name == "init-sheet-tasks":
+            task_command.add_argument(
+                "--cities-list",
+                default=str(Path(__file__).resolve().parents[2] / "tasks" / "cities_list.json"),
+            )
+            task_command.add_argument("--apply", action="store_true", help="Create the three managed tabs")
+        elif command_name == "sheet-tasks":
+            task_command.add_argument("--apply", action="store_true", help="Create and process the marked task runs")
 
     smoke = commands.add_parser("smoke", help="Create and synchronously process one live URL job")
     smoke.add_argument("--url", required=True)
@@ -158,6 +182,60 @@ def main(argv: list[str] | None = None) -> int:
         exported = client.append_candidates(args.spreadsheet_id, new_domains_sheet=args.new_domains_sheet, rows=candidates)
         repository.mark_google_exports(spreadsheet_id=args.spreadsheet_id, domains=[candidate["domain"] for candidate in candidates])
         print(json.dumps({"status": "success", "exported_count": exported}, ensure_ascii=False))
+        return 0
+
+    if args.command in {"init-sheet-tasks", "sheet-tasks", "sync-sheet-tasks"}:
+        if not args.credentials_path:
+            print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
+            return 2
+        try:
+            task_settings = SheetTaskSettings.from_env()
+            client = GoogleSheetsQueueClient.from_service_account(args.credentials_path)
+            if args.command == "init-sheet-tasks":
+                cities = load_city_groups(Path(args.cities_list))
+                if not args.apply:
+                    print(json.dumps({"status": "preview", "sheets": [task_settings.cities_sheet, task_settings.summary_sheet, task_settings.results_sheet], "cities": len(cities)}, ensure_ascii=False, indent=2))
+                    return 0
+                client.initialize_task_sheets(task_settings, cities)
+                repository.apply_schema()
+                sync_task_workbook(client, repository, task_settings)
+                print(json.dumps({"status": "success", "operation": "init-sheet-tasks", "cities": len(cities)}, ensure_ascii=False, indent=2))
+                return 0
+            if args.command == "sync-sheet-tasks":
+                repository.apply_schema()
+                sync_task_workbook(client, repository, task_settings)
+                print(json.dumps({"status": "success", "operation": "sync-sheet-tasks"}, ensure_ascii=False, indent=2))
+                return 0
+
+            worker = Stage1Worker(repository, browser, settings)
+            tasks = execute_marked_sheet_tasks(
+                client,
+                repository,
+                worker,
+                settings,
+                task_settings,
+                load_city_catalog(Path(__file__).resolve().parent / "data" / "cities.json"),
+                apply=args.apply,
+            )
+        except (ConfigurationError, SheetTaskError) as error:
+            print(json.dumps({"status": "invalid", "error": str(error)}, ensure_ascii=False, indent=2))
+            return 2
+        except RunHaltedError as error:
+            print(json.dumps({
+                "status": "halted",
+                "run_id": error.run_id,
+                "consecutive_browser_errors": error.consecutive_errors,
+                "reason": error.reason,
+                "artifacts_dir": str(settings.artifacts_dir.resolve()),
+            }, ensure_ascii=False, indent=2))
+            return 1
+        except Exception as error:
+            # The planning workbook is commonly shared after deployment. Keep a
+            # denied/invalid Google API call actionable instead of exposing a
+            # Python traceback to the operator.
+            print(json.dumps({"status": "external_error", "error": str(error)}, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps({"status": "success" if args.apply else "preview", "tasks": tasks}, ensure_ascii=False, indent=2))
         return 0
 
     worker = Stage1Worker(repository, browser, settings)
