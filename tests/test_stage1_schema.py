@@ -42,5 +42,6 @@ def test_schema_keeps_sheet_task_identity_and_domain_provenance():
 
     assert "task_vertical text" in sql
     assert "task_subniche text" in sql
+    assert "sheet_task_batch_id uuid" in sql
     assert "CREATE OR REPLACE VIEW stage1_2gis.sheet_task_domain_results" in sql
     assert "array_agg(DISTINCT job.query_key" in sql

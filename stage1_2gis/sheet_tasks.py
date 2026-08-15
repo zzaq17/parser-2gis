@@ -271,6 +271,7 @@ def create_sheet_task_run(
     city_catalog: dict[str, dict[str, str]],
     *,
     run_id: str | None = None,
+    batch_id: str | None = None,
 ) -> tuple[str, int]:
     missing = [name for name in cities if name not in city_catalog]
     if missing:
@@ -286,6 +287,7 @@ def create_sheet_task_run(
         "queries": queries,
         "cities": cities,
         "cities_by_key": {city_catalog[city]["code"]: city for city in cities},
+        "sheet_task_batch_id": batch_id,
     }
     repository.create_run(
         run_id=run_id,
@@ -293,6 +295,7 @@ def create_sheet_task_run(
         snapshot=snapshot,
         task_vertical=group.vertical,
         task_subniche=group.subniche,
+        sheet_task_batch_id=batch_id,
     )
     job_count = 0
     for city_name in cities:
@@ -387,11 +390,20 @@ def execute_marked_sheet_tasks(
         return planned
 
     repository.apply_schema()
+    batch_id = str(uuid.uuid4())
     created: list[dict[str, Any]] = []
     cleared_controls = {group.key: False for group in selected_groups}
     for group in selected_groups:
-        run_id, job_count = create_sheet_task_run(repository, settings, worker_settings, group, cities, city_catalog)
-        created.append({"vertical": group.vertical, "subniche": group.subniche, "run_id": run_id, "job_count": job_count})
+        run_id, job_count = create_sheet_task_run(
+            repository, settings, worker_settings, group, cities, city_catalog, batch_id=batch_id,
+        )
+        created.append({
+            "vertical": group.vertical,
+            "subniche": group.subniche,
+            "run_id": run_id,
+            "job_count": job_count,
+            "batch_id": batch_id,
+        })
     sync_task_workbook(client, repository, settings, controls_override=cleared_controls)
 
     for task in created:
@@ -402,3 +414,45 @@ def execute_marked_sheet_tasks(
             raise
         sync_task_workbook(client, repository, settings, controls_override=cleared_controls)
     return created
+
+
+def resume_latest_sheet_task_batch(
+    client: PlanningSheetClient,
+    repository: Stage1Repository,
+    worker: Stage1Worker,
+    settings: SheetTaskSettings,
+    *,
+    retry_errors: bool,
+    prepare_only: bool,
+) -> dict[str, Any]:
+    """Continue every unfinished run from the most recent sheet-tasks launch."""
+    batch = repository.get_latest_sheet_task_batch()
+    if batch is None:
+        raise SheetTaskError("No resumable sheet-tasks batch exists")
+
+    batch_id, runs = batch
+    resumed: list[dict[str, Any]] = []
+    for run in runs:
+        if run["status"] == "completed":
+            continue
+        if run["status"] not in {"queued", "running", "halted", "completed_with_errors"}:
+            raise SheetTaskError(
+                f"Latest sheet-tasks batch contains unsupported run status {run['status']!r}"
+            )
+        run_id = str(run["run_id"])
+        recovery = repository.resume_run(run_id, retry_errors=retry_errors)
+        if recovery is None:
+            raise SheetTaskError(f"Sheet task run disappeared during resume: {run_id}")
+        processed = 0
+        try:
+            if not prepare_only:
+                processed = worker.process_run(run_id)
+        except RunHaltedError:
+            sync_task_workbook(client, repository, settings)
+            raise
+        sync_task_workbook(client, repository, settings)
+        resumed.append({"run_id": run_id, "previous_status": run["status"], **recovery, "processed_jobs": processed})
+
+    if not resumed:
+        raise SheetTaskError("Latest sheet-tasks batch is already complete")
+    return {"batch_id": batch_id, "runs": resumed, "prepared_only": prepare_only}

@@ -199,9 +199,13 @@ ALTER TABLE stage1_2gis.branches ADD COLUMN IF NOT EXISTS is_advertised boolean 
 -- input_snapshot_json.
 ALTER TABLE stage1_2gis.runs ADD COLUMN IF NOT EXISTS task_vertical text;
 ALTER TABLE stage1_2gis.runs ADD COLUMN IF NOT EXISTS task_subniche text;
+ALTER TABLE stage1_2gis.runs ADD COLUMN IF NOT EXISTS sheet_task_batch_id uuid;
 CREATE INDEX IF NOT EXISTS idx_stage1_sheet_task_runs
     ON stage1_2gis.runs (task_vertical, task_subniche, created_at DESC)
     WHERE command_id = 'sheet-tasks';
+CREATE INDEX IF NOT EXISTS idx_stage1_sheet_task_batches
+    ON stage1_2gis.runs (sheet_task_batch_id, created_at)
+    WHERE command_id = 'sheet-tasks' AND sheet_task_batch_id IS NOT NULL;
 
 -- Stable Stage 3 input: one highest-potential 2GIS branch per normalized domain.
 CREATE OR REPLACE VIEW stage1_2gis.stage3_candidates AS

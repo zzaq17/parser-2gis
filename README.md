@@ -75,6 +75,13 @@ xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
 ../.venv/bin/python -m stage1_2gis sync-sheet-tasks
 ```
 
+To resume the last `sheet-tasks --apply` batch without restoring its checkboxes:
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-sheet-tasks
+```
+
 `sync-sheet-tasks` rebuilds the managed summary and result tabs from PostgreSQL
 after an interruption. It never writes to `STAGE1_SPREADSHEET_ID` or `NEW domains`.
 

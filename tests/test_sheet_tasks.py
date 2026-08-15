@@ -11,6 +11,7 @@ from stage1_2gis.sheet_tasks import (
     parse_city_choices,
     parse_phrase_groups,
     result_rows,
+    resume_latest_sheet_task_batch,
     summary_rows,
 )
 
@@ -102,6 +103,60 @@ def test_sheet_task_run_snapshots_group_and_creates_phrase_by_city_jobs():
     assert repository.runs[0]["snapshot"]["cities_by_key"] == {"moscow": "Москва"}
     assert {job["query_key"] for job in repository.jobs} == set(repository.runs[0]["snapshot"]["queries"])
     assert all("2gis.ru/moscow/search/" in job["source_url"] for job in repository.jobs)
+    assert repository.runs[0]["sheet_task_batch_id"] is None
+
+
+class ResumeRepository:
+    def __init__(self, runs):
+        self.runs = runs
+        self.resumed = []
+
+    def get_latest_sheet_task_batch(self):
+        return "batch-1", self.runs
+
+    def resume_run(self, run_id, *, retry_errors):
+        self.resumed.append((run_id, retry_errors))
+        return {"requeued_jobs": 1, "queued_jobs": 1, "completed_jobs": 2, "failed_jobs": 0}
+
+
+class ResumeWorker:
+    def __init__(self):
+        self.processed = []
+
+    def process_run(self, run_id):
+        self.processed.append(run_id)
+        return 1
+
+
+def test_resume_latest_batch_skips_completed_and_uses_persisted_statuses(monkeypatch):
+    repository = ResumeRepository([
+        {"run_id": "completed", "status": "completed"},
+        {"run_id": "halted", "status": "halted"},
+        {"run_id": "queued", "status": "queued"},
+    ])
+    worker = ResumeWorker()
+    syncs = []
+    monkeypatch.setattr("stage1_2gis.sheet_tasks.sync_task_workbook", lambda *args: syncs.append(args))
+
+    result = resume_latest_sheet_task_batch(
+        object(), repository, worker, SheetTaskSettings(spreadsheet_id="planning-sheet"),
+        retry_errors=True, prepare_only=False,
+    )
+
+    assert repository.resumed == [("halted", True), ("queued", True)]
+    assert worker.processed == ["halted", "queued"]
+    assert len(syncs) == 2
+    assert result["batch_id"] == "batch-1"
+    assert [run["previous_status"] for run in result["runs"]] == ["halted", "queued"]
+
+
+def test_resume_latest_batch_rejects_completed_batch(monkeypatch):
+    monkeypatch.setattr("stage1_2gis.sheet_tasks.sync_task_workbook", lambda *args: None)
+    with pytest.raises(SheetTaskError, match="already complete"):
+        resume_latest_sheet_task_batch(
+            object(), ResumeRepository([{"run_id": "completed", "status": "completed"}]), ResumeWorker(),
+            SheetTaskSettings(spreadsheet_id="planning-sheet"), retry_errors=True, prepare_only=False,
+        )
 
 
 def test_summary_uses_latest_run_status_and_pending_checkbox():

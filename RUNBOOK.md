@@ -131,6 +131,22 @@ export. After an interruption or a manual resume, refresh the tabs with:
 ../.venv/bin/python -m stage1_2gis sync-sheet-tasks
 ```
 
+To continue the latest `sheet-tasks --apply` launch, do not re-run
+`init-sheet-tasks` and do not restore its checkboxes. The command resumes the
+halted run and then processes the remaining runs created by that same launch:
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac" \
+  ../.venv/bin/python -m stage1_2gis resume-sheet-tasks
+```
+
+It uses persisted run statuses: `Готово` is skipped, while `Остановлено`,
+`Ожидает`, `В работе`, and `Готово с ошибками` are resumed. The summary tab is
+refreshed after every run. Use `--prepare-only` to only rebuild the queue, or
+`--skip-errors` to leave failed/partial jobs untouched. Batches created before
+this upgrade do not have a batch id; resume those once with
+`resume-run --run-id RUN_ID`.
+
 ## Browser errors and debug artifacts
 
 Each failed browser attempt writes a debug bundle to `STAGE1_ARTIFACTS_DIR`:
@@ -139,6 +155,11 @@ Each failed browser attempt writes a debug bundle to `STAGE1_ARTIFACTS_DIR`:
 - `JOB_ID-attempt-N.html` — page HTML for text and selector inspection;
 - `JOB_ID-attempt-N.zip` — Playwright trace, opened with `playwright show-trace`;
 - `JOB_ID-attempt-N.json` — requested/current URLs, page title, error and captcha marker.
+
+`Ничего не нашлось, попробуйте уточнить запрос` is a normal empty 2GIS
+response: the current phrase job finishes with zero records and the worker
+continues with the next job. It does not create failure artifacts or contribute
+to the browser-error halt limit.
 
 Captcha-like page text is classified as `captcha_detected`. After three
 consecutive browser errors (`STAGE1_CONSECUTIVE_BROWSER_ERROR_LIMIT`) the run

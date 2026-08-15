@@ -42,6 +42,10 @@ _CAPTCHA_PATTERN = re.compile(
     r"captcha|капч|подтвердите.{0,30}(что вы|человек)|робот|unusual traffic|access denied",
     re.IGNORECASE,
 )
+_NO_RESULTS_PATTERN = re.compile(
+    r"ничего\s+не\s+нашлось.{0,200}уточнить\s+запрос",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class BrowserAdapter(Protocol):
@@ -130,7 +134,19 @@ class PlaywrightBrowserAdapter:
 
                     page.on("response", handle_response)
                     page.goto(url, wait_until="domcontentloaded", referer="https://www.google.com/")
-                    page.wait_for_selector("a[href*='?stat=']")
+                    try:
+                        page.wait_for_function(
+                            """() => Boolean(document.querySelector("a[href*='?stat=']"))
+                                || (document.body?.innerText || "").includes("Ничего не нашлось")"""
+                        )
+                    except PlaywrightTimeoutError:
+                        if self._page_looks_like_no_results(page):
+                            LOGGER.info("2GIS returned no results for %s", url)
+                            return 0
+                        raise
+                    if self._page_looks_like_no_results(page):
+                        LOGGER.info("2GIS returned no results for %s", url)
+                        return 0
                     self._raise_callback_error(callback_errors)
 
                     visited_hrefs: set[str] = set()
@@ -225,6 +241,14 @@ class PlaywrightBrowserAdapter:
         except Exception:
             return False
         return bool(_CAPTCHA_PATTERN.search(text))
+
+    @staticmethod
+    def _page_looks_like_no_results(page: Any) -> bool:
+        try:
+            text = f"{page.title()}\n{page.locator('body').inner_text(timeout=2_000)}"
+        except Exception:
+            return False
+        return bool(_NO_RESULTS_PATTERN.search(text))
 
     @staticmethod
     def _write_failure_artifacts(

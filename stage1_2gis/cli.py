@@ -19,6 +19,7 @@ from .sheet_tasks import (
     execute_marked_sheet_tasks,
     load_city_catalog,
     load_city_groups,
+    resume_latest_sheet_task_batch,
     sync_task_workbook,
 )
 from .worker import RunHaltedError, Stage1Worker, wait_until_stopped
@@ -81,6 +82,7 @@ def build_parser(env: Mapping[str, str] | None = None) -> argparse.ArgumentParse
     for command_name, help_text in (
         ("init-sheet-tasks", "Create and initialize the separate 2GIS planning sheets"),
         ("sheet-tasks", "Preview or process marked 2GIS sheet tasks"),
+        ("resume-sheet-tasks", "Resume the latest interrupted sheet-tasks launch"),
         ("sync-sheet-tasks", "Refresh planning-sheet summaries and results from PostgreSQL"),
     ):
         task_command = commands.add_parser(command_name, help=help_text)
@@ -93,6 +95,9 @@ def build_parser(env: Mapping[str, str] | None = None) -> argparse.ArgumentParse
             task_command.add_argument("--apply", action="store_true", help="Create the three managed tabs")
         elif command_name == "sheet-tasks":
             task_command.add_argument("--apply", action="store_true", help="Create and process the marked task runs")
+        elif command_name == "resume-sheet-tasks":
+            task_command.add_argument("--skip-errors", action="store_true", help="Do not retry failed/partial jobs")
+            task_command.add_argument("--prepare-only", action="store_true", help="Requeue jobs but do not start the browser")
 
     smoke = commands.add_parser("smoke", help="Create and synchronously process one live URL job")
     smoke.add_argument("--url", required=True)
@@ -184,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "success", "exported_count": exported}, ensure_ascii=False))
         return 0
 
-    if args.command in {"init-sheet-tasks", "sheet-tasks", "sync-sheet-tasks"}:
+    if args.command in {"init-sheet-tasks", "sheet-tasks", "resume-sheet-tasks", "sync-sheet-tasks"}:
         if not args.credentials_path:
             print("Missing Google service account path: --credentials-path or GOOGLE_APPLICATION_CREDENTIALS", file=sys.stderr)
             return 2
@@ -208,6 +213,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
             worker = Stage1Worker(repository, browser, settings)
+            if args.command == "resume-sheet-tasks":
+                repository.apply_schema()
+                resumed_batch = resume_latest_sheet_task_batch(
+                    client,
+                    repository,
+                    worker,
+                    task_settings,
+                    retry_errors=not args.skip_errors,
+                    prepare_only=args.prepare_only,
+                )
+                print(json.dumps({"status": "success", **resumed_batch}, ensure_ascii=False, indent=2))
+                return 0
             tasks = execute_marked_sheet_tasks(
                 client,
                 repository,

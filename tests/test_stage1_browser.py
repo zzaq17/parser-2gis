@@ -36,6 +36,21 @@ class FakePage:
         return "<html><body>captcha</body></html>"
 
 
+class FakeNoResultsBody:
+    def inner_text(self, *, timeout):
+        assert timeout == 2_000
+        return "Ничего не нашлось, попробуйте уточнить запрос"
+
+
+class FakeNoResultsPage:
+    def title(self):
+        return "Поиск в 2ГИС"
+
+    def locator(self, selector):
+        assert selector == "body"
+        return FakeNoResultsBody()
+
+
 def test_failure_artifacts_include_trace_screenshot_html_and_metadata(tmp_path):
     screenshot = tmp_path / "job-attempt.png"
     paths = PlaywrightBrowserAdapter._write_failure_artifacts(
@@ -53,3 +68,7 @@ def test_failure_artifacts_include_trace_screenshot_html_and_metadata(tmp_path):
     assert metadata["page_url"] == "https://2gis.ru/captcha"
     assert metadata["captcha_suspected"] is True
     assert metadata["error"] == "timed out"
+
+
+def test_no_results_page_is_a_normal_empty_search_result():
+    assert PlaywrightBrowserAdapter._page_looks_like_no_results(FakeNoResultsPage()) is True

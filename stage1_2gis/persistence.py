@@ -241,13 +241,14 @@ class Stage1Repository:
         snapshot: dict[str, Any] | None = None,
         task_vertical: str | None = None,
         task_subniche: str | None = None,
+        sheet_task_batch_id: str | None = None,
     ) -> None:
         with self._connection() as connection:
             connection.cursor().execute(
                 """
                 INSERT INTO stage1_2gis.runs (
-                    run_id, command_id, status, input_snapshot_json, task_vertical, task_subniche
-                ) VALUES (%s, %s, 'queued', %s, %s, %s)
+                    run_id, command_id, status, input_snapshot_json, task_vertical, task_subniche, sheet_task_batch_id
+                ) VALUES (%s, %s, 'queued', %s, %s, %s, %s::uuid)
                 ON CONFLICT (run_id) DO NOTHING
                 """,
                 (
@@ -256,8 +257,36 @@ class Stage1Repository:
                     json.dumps(snapshot or {}, ensure_ascii=False),
                     task_vertical,
                     task_subniche,
+                    sheet_task_batch_id,
                 ),
             )
+
+    def get_latest_sheet_task_batch(self) -> tuple[str, list[dict[str, Any]]] | None:
+        """Return the runs created by the latest resumable sheet-tasks launch."""
+        with self._connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                WITH latest_batch AS (
+                    SELECT sheet_task_batch_id
+                    FROM stage1_2gis.runs
+                    WHERE command_id = 'sheet-tasks'
+                      AND sheet_task_batch_id IS NOT NULL
+                    ORDER BY created_at DESC, run_id DESC
+                    LIMIT 1
+                )
+                SELECT run.sheet_task_batch_id, run.run_id, run.status
+                FROM stage1_2gis.runs AS run
+                JOIN latest_batch ON latest_batch.sheet_task_batch_id = run.sheet_task_batch_id
+                ORDER BY run.created_at, run.run_id
+                """
+            )
+            rows = cursor.fetchall()
+        if not rows:
+            return None
+        return str(rows[0][0]), [
+            dict(zip(("run_id", "status"), row[1:], strict=True)) for row in rows
+        ]
 
     def list_sheet_task_runs(self) -> list[dict[str, Any]]:
         """Return every planning run; callers choose the latest task per niche."""
