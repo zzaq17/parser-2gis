@@ -1,6 +1,9 @@
 import json
+import subprocess
 
-from stage1_2gis.browser import PlaywrightBrowserAdapter
+import pytest
+
+from stage1_2gis.browser import BrowserDisplayError, PlaywrightBrowserAdapter
 
 
 class FakeTracing:
@@ -72,3 +75,27 @@ def test_failure_artifacts_include_trace_screenshot_html_and_metadata(tmp_path):
 
 def test_no_results_page_is_a_normal_empty_search_result():
     assert PlaywrightBrowserAdapter._page_looks_like_no_results(FakeNoResultsPage()) is True
+
+
+def test_headed_preflight_rejects_missing_display(monkeypatch, tmp_path):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    browser = PlaywrightBrowserAdapter(
+        headed=True, disable_images=True, timeout_seconds=1, artifacts_dir=tmp_path,
+    )
+
+    with pytest.raises(BrowserDisplayError, match="DISPLAY is unset"):
+        browser.preflight()
+
+
+def test_headed_preflight_checks_the_x_server(monkeypatch, tmp_path):
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(
+        "stage1_2gis.browser.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], returncode=1),
+    )
+    browser = PlaywrightBrowserAdapter(
+        headed=True, disable_images=True, timeout_seconds=1, artifacts_dir=tmp_path,
+    )
+
+    with pytest.raises(BrowserDisplayError, match="DISPLAY=':99' is unavailable"):
+        browser.preflight()

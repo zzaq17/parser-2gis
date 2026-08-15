@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from .browser import PlaywrightBrowserAdapter
+from .browser import BrowserDisplayError, PlaywrightBrowserAdapter
 from .config import ConfigurationError, PostgresSettings, SheetTaskSettings, WorkerSettings, runtime_env
 from .google_sheets import GoogleSheetsQueueClient
 from .persistence import Stage1Repository, build_connection_factory
@@ -120,6 +120,15 @@ def _build_runtime() -> tuple[Stage1Repository, WorkerSettings, PlaywrightBrowse
     return repository, settings, browser
 
 
+def _preflight_browser(browser: PlaywrightBrowserAdapter) -> int | None:
+    try:
+        browser.preflight()
+    except BrowserDisplayError as error:
+        print(json.dumps({"status": "invalid", "error": str(error)}, ensure_ascii=False, indent=2))
+        return 2
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -212,6 +221,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"status": "success", "operation": "sync-sheet-tasks"}, ensure_ascii=False, indent=2))
                 return 0
 
+            if (args.command == "sheet-tasks" and args.apply) or (
+                args.command == "resume-sheet-tasks" and not args.prepare_only
+            ):
+                preflight_exit = _preflight_browser(browser)
+                if preflight_exit is not None:
+                    return preflight_exit
             worker = Stage1Worker(repository, browser, settings)
             if args.command == "resume-sheet-tasks":
                 repository.apply_schema()
@@ -257,9 +272,15 @@ def main(argv: list[str] | None = None) -> int:
 
     worker = Stage1Worker(repository, browser, settings)
     if args.command == "browser-worker":
+        preflight_exit = _preflight_browser(browser)
+        if preflight_exit is not None:
+            return preflight_exit
         wait_until_stopped(worker)
         return 0
     if args.command == "process-run":
+        preflight_exit = _preflight_browser(browser)
+        if preflight_exit is not None:
+            return preflight_exit
         try:
             processed = worker.process_run(args.run_id)
         except RunHaltedError as error:
@@ -274,6 +295,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"status": "success", "processed_jobs": processed, "run_id": args.run_id}))
         return 0
     if args.command == "resume-run":
+        if not args.prepare_only:
+            preflight_exit = _preflight_browser(browser)
+            if preflight_exit is not None:
+                return preflight_exit
         resumed = repository.resume_run(args.run_id, retry_errors=not args.skip_errors)
         if resumed is None:
             print(json.dumps({"status": "not_found", "run_id": args.run_id}))
@@ -307,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
 
     run_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
+    preflight_exit = _preflight_browser(browser)
+    if preflight_exit is not None:
+        return preflight_exit
     repository.create_run(run_id=run_id, command_id="smoke", snapshot={"url": args.url})
     repository.create_job(
         job_id=job_id,

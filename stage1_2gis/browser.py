@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +38,13 @@ class BrowserTimeoutError(BrowserError):
 
 class BrowserCaptchaError(BrowserError):
     error_code = "captcha_detected"
+
+
+class BrowserDisplayError(BrowserError):
+    """Raised before work starts when headed Chromium has no usable display."""
+
+    retryable = False
+    error_code = "browser_display_unavailable"
 
 
 _CAPTCHA_PATTERN = re.compile(
@@ -74,6 +83,39 @@ class PlaywrightBrowserAdapter:
         self._disable_images = disable_images
         self._timeout_ms = timeout_seconds * 1000
         self._artifacts_dir = artifacts_dir
+
+    def preflight(self) -> None:
+        """Fail before queue mutation when headed Chromium cannot use an X server."""
+        if not self._headed:
+            return
+        display = os.environ.get("DISPLAY", "").strip()
+        if not display:
+            raise BrowserDisplayError(
+                "STAGE1_HEADED=1 requires an X server, but DISPLAY is unset. "
+                "Run the command through xvfb-run or set STAGE1_HEADED=0."
+            )
+        try:
+            probe = subprocess.run(
+                ("xdpyinfo", "-display", display),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=3,
+            )
+        except FileNotFoundError:
+            LOGGER.warning("xdpyinfo is unavailable; checking only DISPLAY=%s", display)
+            return
+        except subprocess.TimeoutExpired as error:
+            raise BrowserDisplayError(
+                f"X server DISPLAY={display!r} did not respond within 3 seconds. "
+                "Run the command through xvfb-run or set STAGE1_HEADED=0."
+            ) from error
+        if probe.returncode:
+            raise BrowserDisplayError(
+                f"X server DISPLAY={display!r} is unavailable. "
+                "Run the command through xvfb-run or set STAGE1_HEADED=0."
+            )
 
     def collect_items(
         self,

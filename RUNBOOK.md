@@ -161,6 +161,11 @@ response: the current phrase job finishes with zero records and the worker
 continues with the next job. It does not create failure artifacts or contribute
 to the browser-error halt limit.
 
+Before every browser-processing command, headed mode now checks `DISPLAY` and
+uses `xdpyinfo` to confirm that its X server responds. If the check fails, the
+command stops before it creates, requeues, or claims a job; run it through
+`xvfb-run` or set `STAGE1_HEADED=0`.
+
 Captcha-like page text is classified as `captcha_detected`. After three
 consecutive browser errors (`STAGE1_CONSECUTIVE_BROWSER_ERROR_LIMIT`) the run
 is marked `halted`, browser processing stops, and `process-run`/`resume-run`
