@@ -17,6 +17,7 @@ from .persistence import Stage1Repository, build_connection_factory
 from .sheet_tasks import (
     SheetTaskError,
     execute_marked_sheet_tasks,
+    initialize_task_workbook,
     load_city_catalog,
     load_city_groups,
     resume_latest_sheet_task_batch,
@@ -212,8 +213,8 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
                 client.initialize_task_sheets(task_settings, cities)
                 repository.apply_schema()
-                sync_task_workbook(client, repository, task_settings)
-                print(json.dumps({"status": "success", "operation": "init-sheet-tasks", "cities": len(cities)}, ensure_ascii=False, indent=2))
+                tasks = initialize_task_workbook(client, repository, task_settings)
+                print(json.dumps({"status": "success", "operation": "init-sheet-tasks", "cities": len(cities), "tasks": tasks}, ensure_ascii=False, indent=2))
                 return 0
             if args.command == "sync-sheet-tasks":
                 repository.apply_schema()

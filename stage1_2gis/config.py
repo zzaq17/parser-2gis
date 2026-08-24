@@ -115,21 +115,28 @@ class SheetTaskSettings:
     """Names and location of the 2GIS planning workbook."""
 
     spreadsheet_id: str
-    phrases_sheet: str = "Ключевые фразы 2GIS"
-    cities_sheet: str = "Города 2GIS"
-    summary_sheet: str = "Сводка 2GIS"
-    results_sheet: str = "Результаты 2GIS"
+    phrases_sheet: str
+    cities_sheet: str
+    summary_sheet: str
+    results_sheet: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> SheetTaskSettings:
         source = runtime_env(env)
-        spreadsheet_id = source.get("STAGE1_TASKS_SPREADSHEET_ID", "").strip()
-        if not spreadsheet_id:
-            raise ConfigurationError("Missing planning spreadsheet ID: STAGE1_TASKS_SPREADSHEET_ID")
+        names = (
+            "STAGE1_TASKS_SPREADSHEET_ID",
+            "STAGE1_TASKS_PHRASES_SHEET",
+            "STAGE1_TASKS_CITIES_SHEET",
+            "STAGE1_TASKS_SUMMARY_SHEET",
+            "STAGE1_TASKS_RESULTS_SHEET",
+        )
+        missing = [name for name in names if not source.get(name, "").strip()]
+        if missing:
+            raise ConfigurationError("Missing planning worksheet settings: " + ", ".join(missing))
         return cls(
-            spreadsheet_id=spreadsheet_id,
-            phrases_sheet=source.get("STAGE1_TASKS_PHRASES_SHEET", "Ключевые фразы 2GIS"),
-            cities_sheet=source.get("STAGE1_TASKS_CITIES_SHEET", "Города 2GIS"),
-            summary_sheet=source.get("STAGE1_TASKS_SUMMARY_SHEET", "Сводка 2GIS"),
-            results_sheet=source.get("STAGE1_TASKS_RESULTS_SHEET", "Результаты 2GIS"),
+            spreadsheet_id=source["STAGE1_TASKS_SPREADSHEET_ID"].strip(),
+            phrases_sheet=source["STAGE1_TASKS_PHRASES_SHEET"].strip(),
+            cities_sheet=source["STAGE1_TASKS_CITIES_SHEET"].strip(),
+            summary_sheet=source["STAGE1_TASKS_SUMMARY_SHEET"].strip(),
+            results_sheet=source["STAGE1_TASKS_RESULTS_SHEET"].strip(),
         )

@@ -79,8 +79,9 @@ class PlanningSheetClient(Protocol):
     def read_cities(self, settings: SheetTaskSettings) -> list[list[object]]: ...
     def read_summary_controls(self, settings: SheetTaskSettings) -> list[list[object]]: ...
     def initialize_task_sheets(self, settings: SheetTaskSettings, cities: list[tuple[str, str]]) -> None: ...
-    def write_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None: ...
-    def write_task_results(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None: ...
+    def append_missing_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> int: ...
+    def sync_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None: ...
+    def sync_task_results(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None: ...
 
 
 def _cell(value: object) -> str:
@@ -170,7 +171,11 @@ def parse_summary_controls(rows: list[list[object]], groups: Iterable[PhraseGrou
             continue
         key = (vertical, subniche)
         if key not in known_keys:
-            raise SheetTaskError(f"Summary row {row_number} refers to unknown niche {vertical!r} / {subniche!r}")
+            # The summary is a generated operator view. A source phrase can be
+            # renamed or removed while its old summary row still exists; it is
+            # safe to discard that stale control because the next write
+            # rebuilds the sheet from the current phrase groups.
+            continue
         if key in controls:
             raise SheetTaskError(f"Summary row {row_number} duplicates niche {vertical!r} / {subniche!r}")
         controls[key] = marker_selected(marker, cell_name=f"Summary row {row_number}")
@@ -354,8 +359,25 @@ def sync_task_workbook(
     if controls_override:
         controls.update(controls_override)
     runs = repository.list_sheet_task_runs()
-    client.write_task_summary(settings, summary_rows(groups, runs, controls))
-    client.write_task_results(settings, result_rows(repository.list_sheet_task_results(), runs))
+    client.sync_task_summary(settings, summary_rows(groups, runs, controls))
+    client.sync_task_results(settings, result_rows(repository.list_sheet_task_results(), runs))
+
+
+def initialize_task_workbook(
+    client: PlanningSheetClient,
+    repository: Stage1Repository,
+    settings: SheetTaskSettings,
+) -> int:
+    """Build the generated workbook tabs from the current source sheets.
+
+    Initialization deliberately does not read summary controls: they may be
+    left over from an earlier set of phrase groups. One generated row per
+    unique vertical/subniche pair is appended from the phrases sheet instead.
+    Existing summary and result rows are retained as task history.
+    """
+    groups = parse_phrase_groups(client.read_phrase_rows(settings))
+    runs = repository.list_sheet_task_runs()
+    return client.append_missing_task_summary(settings, summary_rows(groups, runs, {}))
 
 
 def execute_marked_sheet_tasks(

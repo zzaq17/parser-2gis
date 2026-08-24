@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import date
+from time import sleep
 from typing import Any
 
 from .config import SheetTaskSettings
 from .domain import canonicalize_domain
 
 SHEET_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
+_BATCH_WRITE_MAX_RANGES = 200
+_RETRYABLE_WRITE_STATUSES = {429, 500, 502, 503, 504}
+_WRITE_RETRY_DELAYS_SECONDS = (1, 2, 4, 8, 16)
 
 
 def export_source(is_advertised: object) -> str:
@@ -89,19 +93,76 @@ class GoogleSheetsQueueClient:
         return response.get("values", [])
 
     def _write_values(self, spreadsheet_id: str, sheet: str, cell_range: str, values: list[list[object]]) -> None:
-        self._service.spreadsheets().values().update(
+        request = self._service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=self._range(sheet, cell_range),
             valueInputOption="USER_ENTERED",
             body={"values": values},
-        ).execute()
+        )
+        self._execute_write(request)
+
+    def _write_value_ranges(
+        self,
+        spreadsheet_id: str,
+        sheet: str,
+        ranges: list[tuple[str, list[object]]],
+    ) -> None:
+        """Write existing rows in batches so one sync stays well below API quota."""
+        for offset in range(0, len(ranges), _BATCH_WRITE_MAX_RANGES):
+            chunk = ranges[offset:offset + _BATCH_WRITE_MAX_RANGES]
+            request = self._service.spreadsheets().values().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={
+                    "valueInputOption": "USER_ENTERED",
+                    "data": [
+                        {"range": self._range(sheet, cell_range), "values": [row]}
+                        for cell_range, row in chunk
+                    ],
+                },
+            )
+            self._execute_write(request)
 
     def _clear_values(self, spreadsheet_id: str, sheet: str, cell_range: str) -> None:
-        self._service.spreadsheets().values().clear(
+        request = self._service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
             range=self._range(sheet, cell_range),
             body={},
-        ).execute()
+        )
+        self._execute_write(request)
+
+    def _append_values(
+        self,
+        spreadsheet_id: str,
+        sheet: str,
+        cell_range: str,
+        values: list[list[object]],
+    ) -> None:
+        if not values:
+            return
+        request = self._service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=self._range(sheet, cell_range),
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": values},
+        )
+        self._execute_write(request)
+
+    @staticmethod
+    def _is_retryable_write_error(error: Exception) -> bool:
+        response = getattr(error, "resp", None)
+        return getattr(response, "status", None) in _RETRYABLE_WRITE_STATUSES
+
+    def _execute_write(self, request: Any) -> Any:
+        for delay in (0, *_WRITE_RETRY_DELAYS_SECONDS):
+            if delay:
+                sleep(delay)
+            try:
+                return request.execute()
+            except Exception as error:
+                if not self._is_retryable_write_error(error) or delay == _WRITE_RETRY_DELAYS_SECONDS[-1]:
+                    raise
+        raise AssertionError("unreachable")
 
     def _sheet_ids(self, spreadsheet_id: str) -> dict[str, int]:
         response = self._service.spreadsheets().get(
@@ -122,8 +183,18 @@ class GoogleSheetsQueueClient:
     ) -> None:
         existing = self._values(spreadsheet_id, sheet, f"A1:{chr(64 + len(headers))}2")
         if existing and any(cell for row in existing for cell in row):
-            if tuple(str(cell).strip() for cell in existing[0][:len(headers)]) != headers:
+            existing_headers = tuple(str(cell).strip() for cell in existing[0])
+            if existing_headers != headers[:len(existing_headers)]:
                 raise ValueError(f"Sheet {sheet!r} has unexpected headers; refusing to overwrite it")
+            if len(existing_headers) < len(headers):
+                start_column = chr(65 + len(existing_headers))
+                end_column = chr(64 + len(headers))
+                self._write_values(
+                    spreadsheet_id,
+                    sheet,
+                    f"{start_column}1:{end_column}1",
+                    [list(headers[len(existing_headers):])],
+                )
             return
         self._write_values(spreadsheet_id, sheet, f"A1:{chr(64 + len(headers))}{1 + len(rows or [])}", [list(headers), *(rows or [])])
 
@@ -212,10 +283,67 @@ class GoogleSheetsQueueClient:
     def read_summary_controls(self, settings: SheetTaskSettings) -> list[list[object]]:
         return self._values(settings.spreadsheet_id, settings.summary_sheet, "A2:D1000")
 
-    def write_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None:
-        self._clear_values(settings.spreadsheet_id, settings.summary_sheet, "A:O")
-        self._write_values(settings.spreadsheet_id, settings.summary_sheet, f"A1:O{len(rows)}", rows)
+    def append_missing_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> int:
+        existing = self._values(settings.spreadsheet_id, settings.summary_sheet, "A2:B10000")
+        known = {
+            (_cell(row, 0), _cell(row, 1))
+            for row in existing
+            if _cell(row, 0) and _cell(row, 1)
+        }
+        missing = [row for row in rows[1:] if (str(row[0]).strip(), str(row[1]).strip()) not in known]
+        self._append_values(settings.spreadsheet_id, settings.summary_sheet, "A:O", missing)
+        return len(missing)
 
-    def write_task_results(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None:
-        self._clear_values(settings.spreadsheet_id, settings.results_sheet, "A:L")
-        self._write_values(settings.spreadsheet_id, settings.results_sheet, f"A1:L{len(rows)}", rows)
+    def sync_task_summary(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None:
+        self._merge_task_rows(settings.spreadsheet_id, settings.summary_sheet, "O", rows, key_columns=(0, 1))
+
+    def sync_task_results(self, settings: SheetTaskSettings, rows: list[list[object]]) -> None:
+        self._merge_task_rows(
+            settings.spreadsheet_id,
+            settings.results_sheet,
+            "L",
+            rows,
+            key_columns=(0, 3),
+            update_existing=False,
+        )
+
+    def _merge_task_rows(
+        self,
+        spreadsheet_id: str,
+        sheet: str,
+        last_column: str,
+        rows: list[list[object]],
+        *,
+        key_columns: tuple[int, ...],
+        update_existing: bool = True,
+    ) -> None:
+        """Update current rows and append missing ones without deleting history."""
+        existing = self._values(spreadsheet_id, sheet, f"A1:{last_column}10000")
+        if not existing:
+            self._write_values(spreadsheet_id, sheet, f"A1:{last_column}{len(rows)}", rows)
+            return
+        if tuple(str(cell).strip() for cell in existing[0][:len(rows[0])]) != tuple(str(cell) for cell in rows[0]):
+            raise ValueError(f"Sheet {sheet!r} has unexpected headers; refusing to overwrite it")
+
+        row_numbers: dict[tuple[str, ...], int] = {}
+        for row_number, row in enumerate(existing[1:], start=2):
+            key = tuple(_cell(row, column) for column in key_columns)
+            if all(key):
+                row_numbers[key] = row_number
+
+        updates: list[tuple[str, list[object]]] = []
+        missing: list[list[object]] = []
+        for row in rows[1:]:
+            key = tuple(str(row[column]).strip() for column in key_columns)
+            row_number = row_numbers.get(key)
+            if row_number is None:
+                missing.append(row)
+                continue
+            if update_existing:
+                updates.append((f"A{row_number}:{last_column}{row_number}", row))
+        self._write_value_ranges(spreadsheet_id, sheet, updates)
+        self._append_values(spreadsheet_id, sheet, f"A:{last_column}", missing)
+
+
+def _cell(row: list[object], index: int) -> str:
+    return str(row[index]).strip() if index < len(row) and row[index] is not None else ""

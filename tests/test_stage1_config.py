@@ -35,10 +35,18 @@ def test_worker_settings_reject_non_positive_values():
 def test_sheet_task_settings_require_a_separate_planning_spreadsheet():
     with pytest.raises(ConfigurationError):
         SheetTaskSettings.from_env({})
+    with pytest.raises(ConfigurationError, match="STAGE1_TASKS_PHRASES_SHEET"):
+        SheetTaskSettings.from_env({"STAGE1_TASKS_SPREADSHEET_ID": "planning-id"})
 
-    settings = SheetTaskSettings.from_env({"STAGE1_TASKS_SPREADSHEET_ID": "planning-id"})
+    settings = SheetTaskSettings.from_env({
+        "STAGE1_TASKS_SPREADSHEET_ID": "planning-id",
+        "STAGE1_TASKS_PHRASES_SHEET": "phrases",
+        "STAGE1_TASKS_CITIES_SHEET": "cities",
+        "STAGE1_TASKS_SUMMARY_SHEET": "summary",
+        "STAGE1_TASKS_RESULTS_SHEET": "results",
+    })
     assert settings.spreadsheet_id == "planning-id"
-    assert settings.summary_sheet == "Сводка 2GIS"
+    assert settings.summary_sheet == "summary"
 
 
 def test_google_cli_reads_dotenv_before_resolving_argument_defaults(tmp_path, monkeypatch):

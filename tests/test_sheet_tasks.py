@@ -7,13 +7,25 @@ from stage1_2gis.config import SheetTaskSettings, WorkerSettings
 from stage1_2gis.sheet_tasks import (
     SheetTaskError,
     create_sheet_task_run,
+    initialize_task_workbook,
     marker_selected,
     parse_city_choices,
     parse_phrase_groups,
+    parse_summary_controls,
     result_rows,
     resume_latest_sheet_task_batch,
     summary_rows,
 )
+
+
+def task_settings():
+    return SheetTaskSettings(
+        spreadsheet_id="planning-sheet",
+        phrases_sheet="Ключевые фразы 2GIS",
+        cities_sheet="Города 2GIS",
+        summary_sheet="Сводка 2GIS",
+        results_sheet="Результаты 2GIS",
+    )
 
 
 def phrase_rows():
@@ -66,6 +78,15 @@ def test_city_choices_read_checkbox_and_literal_one():
     assert [choice.name for choice in choices if choice.selected] == ["Москва", "Казань"]
 
 
+def test_summary_controls_discards_stale_niches_but_keeps_current_selection():
+    controls = parse_summary_controls([
+        ["Аренда", "Аренда коммерческих помещений", 0, True],
+        ["Медицина", "Стоматология", 0, True],
+    ], parse_phrase_groups(phrase_rows()))
+
+    assert controls == {("Медицина", "Стоматология"): True}
+
+
 class Repository:
     def __init__(self):
         self.runs = []
@@ -78,10 +99,46 @@ class Repository:
         self.jobs.append(kwargs)
 
 
+class WorkbookRepository:
+    def list_sheet_task_runs(self):
+        return []
+
+    def list_sheet_task_results(self):
+        return []
+
+
+class WorkbookClient:
+    def __init__(self):
+        self.appended_summary = None
+
+    def read_phrase_rows(self, settings):
+        return phrase_rows()
+
+    def read_summary_controls(self, settings):
+        raise AssertionError("initialization must not read stale summary controls")
+
+    def append_missing_task_summary(self, settings, rows):
+        self.appended_summary = rows
+        return len(rows) - 1
+
+
+def test_initialization_rebuilds_deduplicated_summary_without_reading_stale_controls():
+    client = WorkbookClient()
+
+    task_count = initialize_task_workbook(client, WorkbookRepository(), task_settings())
+
+    assert task_count == 2
+    assert [(row[0], row[1]) for row in client.appended_summary[1:]] == [
+        ("Медицина", "Офтальмология"),
+        ("Медицина", "Стоматология"),
+    ]
+    assert all(row[3] is False for row in client.appended_summary[1:])
+
+
 def test_sheet_task_run_snapshots_group_and_creates_phrase_by_city_jobs():
     group = parse_phrase_groups(phrase_rows())[1]
     repository = Repository()
-    settings = SheetTaskSettings(spreadsheet_id="planning-sheet")
+    settings = task_settings()
     worker_settings = WorkerSettings(max_attempts=4)
     catalog = {"Москва": {"name": "Москва", "domain": "ru", "code": "moscow"}}
 
@@ -139,7 +196,7 @@ def test_resume_latest_batch_skips_completed_and_uses_persisted_statuses(monkeyp
     monkeypatch.setattr("stage1_2gis.sheet_tasks.sync_task_workbook", lambda *args: syncs.append(args))
 
     result = resume_latest_sheet_task_batch(
-        object(), repository, worker, SheetTaskSettings(spreadsheet_id="planning-sheet"),
+        object(), repository, worker, task_settings(),
         retry_errors=True, prepare_only=False,
     )
 
@@ -155,7 +212,7 @@ def test_resume_latest_batch_rejects_completed_batch(monkeypatch):
     with pytest.raises(SheetTaskError, match="already complete"):
         resume_latest_sheet_task_batch(
             object(), ResumeRepository([{"run_id": "completed", "status": "completed"}]), ResumeWorker(),
-            SheetTaskSettings(spreadsheet_id="planning-sheet"), retry_errors=True, prepare_only=False,
+            task_settings(), retry_errors=True, prepare_only=False,
         )
 
 
