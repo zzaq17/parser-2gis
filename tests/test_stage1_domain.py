@@ -31,9 +31,9 @@ def test_normalize_catalog_document_preserves_website_mapping():
                         {
                             "contacts": [
                                 {"type": "website", "value": "example.ru", "url": "https://www.example.ru/contacts"},
-                                {"type": "website", "value": "vk", "url": "https://vk.com/test"},
+                                {"type": "social", "value": "vk", "url": "https://vk.com/test"},
+                                {"type": "email", "value": "info@example.ru", "url": "https://second.example/path"},
                                 {"type": "phone", "value": "+74950000000", "text": "+7 495 000-00-00"},
-                                {"type": "email", "value": "info@example.ru"},
                             ]
                         }
                     ],
@@ -50,9 +50,16 @@ def test_normalize_catalog_document_preserves_website_mapping():
     assert item.city == "Москва"
     assert item.primary_rubric == "Стоматологии"
     assert item.is_advertised is True
-    assert item.domains == ("example.ru",)
-    assert item.website_domains == (("https://www.example.ru/contacts", "example.ru"),)
-    assert item.websites == ("https://www.example.ru/contacts", "https://vk.com/test")
+    assert item.domains == ("example.ru", "second.example")
+    assert item.website_domains == (
+        ("https://www.example.ru/contacts", "example.ru"),
+        ("https://second.example/path", "second.example"),
+    )
+    assert item.websites == (
+        "https://www.example.ru/contacts",
+        "https://vk.com/test",
+        "https://second.example/path",
+    )
 
 
 def test_www_is_removed_only_from_domain_key():

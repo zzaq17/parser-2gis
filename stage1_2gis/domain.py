@@ -67,18 +67,18 @@ def normalize_catalog_document(document: dict) -> NormalizedItem:
     website_domains: list[tuple[str, str]] = []
     for group in item.contact_groups:
         for contact in group.contacts:
+            if contact.url:
+                websites.append(contact.url)
+                domain = normalize_domain(contact.url)
+                if domain:
+                    domains.append(domain)
+                    website_domains.append((contact.url, domain))
             if contact.type == "phone":
                 value = contact.text or contact.value
                 if value:
                     phones.append(value)
             elif contact.type == "email" and contact.value:
                 emails.append(contact.value)
-            elif contact.type == "website" and contact.url:
-                websites.append(contact.url)
-                domain = normalize_domain(contact.url)
-                if domain:
-                    domains.append(domain)
-                    website_domains.append((contact.url, domain))
 
     city = next((division.name for division in item.adm_div if division.type == "city"), None)
     primary_rubric = next((rubric.name for rubric in item.rubrics if rubric.kind == "primary"), None)
